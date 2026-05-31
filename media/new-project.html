@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<title>ESP — Create New Project</title>
+<style>
+  :root {
+    --bg:           var(--vscode-editor-background);
+    --bg2:          var(--vscode-sideBar-background, var(--vscode-editor-background));
+    --fg:           var(--vscode-editor-foreground);
+    --fg2:          var(--vscode-descriptionForeground);
+    --input-bg:     var(--vscode-input-background);
+    --input-fg:     var(--vscode-input-foreground);
+    --input-border: var(--vscode-input-border, var(--vscode-panel-border, #3e3e42));
+    --btn-bg:       var(--vscode-button-background, #007acc);
+    --btn-fg:       var(--vscode-button-foreground, #fff);
+    --btn-hover:    var(--vscode-button-hoverBackground, #0098ff);
+    --btn2-bg:      var(--vscode-button-secondaryBackground, var(--vscode-editor-background));
+    --btn2-fg:      var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
+    --btn2-hover:   var(--vscode-button-secondaryHoverBackground, var(--vscode-input-background));
+    --border:       var(--vscode-widget-border, var(--vscode-panel-border, #3e3e42));
+    --focus:        var(--vscode-focusBorder, #007fd4);
+    --accent:       var(--vscode-button-background, #007acc);
+    --list-active:  var(--vscode-list-activeSelectionBackground, rgba(0,120,215,0.15));
+    --list-hover:   var(--vscode-list-hoverBackground, rgba(128,128,128,0.1));
+    --error:        var(--vscode-editorError-foreground, #f44747);
+    --warn:         var(--vscode-editorWarning-foreground, #cca700);
+    --ok:           var(--vscode-terminal-ansiGreen, #4ec9b0);
+    --badge-bg:     var(--vscode-badge-background, #4d4d4d);
+    --badge-fg:     var(--vscode-badge-foreground, #fff);
+    --tag-bg:       var(--vscode-input-background, #2d2d30);
+    --tag-border:   var(--vscode-input-border, #3e3e42);
+    --tag-hover:    var(--vscode-list-hoverBackground, rgba(128,128,128,0.1));
+    --section-bg:   var(--vscode-sideBar-background, var(--vscode-editor-background));
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
+    font-size: var(--vscode-font-size, 13px);
+    line-height: 1.5;
+    padding: 0;
+    position: relative;
+  }
+
+  /* ── Header ────────────────────────────────────────────────────── */
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+  }
+  .header-left { flex: 1; min-width: 0; }
+  .header h2 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--fg);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .header .subtitle {
+    color: var(--fg2);
+    font-size: 11px;
+    margin-top: 2px;
+  }
+
+  /* ── Buttons ───────────────────────────────────────────────────── */
+  button {
+    background: var(--btn2-bg);
+    color: var(--btn2-fg);
+    border: 1px solid var(--border);
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  button:hover { background: var(--btn2-hover); }
+  button:focus-visible { outline: 1px solid var(--focus); outline-offset: 1px; }
+  button.primary {
+    background: var(--btn-bg);
+    border-color: var(--btn-bg);
+    color: var(--btn-fg);
+  }
+  button.primary:hover { background: var(--btn-hover); border-color: var(--btn-hover); }
+  button.primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  button.icon-btn {
+    background: none;
+    border: 1px solid transparent;
+    padding: 2px 6px;
+    font-size: 13px;
+    border-radius: 3px;
+    color: var(--fg2);
+  }
+  button.icon-btn:hover {
+    background: var(--tag-hover);
+    border-color: var(--border);
+  }
+
+  /* ── Main Content ──────────────────────────────────────────────── */
+  .content {
+    padding: 16px 20px 40px 20px;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  /* ── Collapsible Section ───────────────────────────────────────── */
+  .section {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 12px;
+    background: var(--section-bg);
+    overflow: hidden;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+    user-select: none;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--fg);
+    transition: background 0.1s;
+  }
+  .section-header:hover { background: var(--list-hover); }
+  .section-header .chevron {
+    font-size: 12px;
+    transition: transform 0.2s ease;
+    color: var(--fg2);
+    width: 16px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .section.collapsed .chevron { transform: rotate(-90deg); }
+  .section-header .section-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  .section-header .section-title { flex: 1; }
+  .section-body {
+    padding: 10px 14px 14px 14px;
+    overflow: hidden;
+    transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
+    max-height: 2000px;
+    opacity: 1;
+  }
+  .section.collapsed .section-body {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  /* ── Form Row ──────────────────────────────────────────────────── */
+  .form-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .form-label {
+    min-width: 140px;
+    padding-top: 5px;
+    font-size: 12px;
+    color: var(--fg);
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .form-label .hint {
+    display: block;
+    font-weight: 400;
+    color: var(--fg2);
+    font-size: 11px;
+    margin-top: 1px;
+  }
+  .form-field { flex: 1; min-width: 0; }
+
+  /* ── Input ─────────────────────────────────────────────────────── */
+  input[type="text"] {
+    background: var(--input-bg);
+    color: var(--input-fg);
+    border: 1px solid var(--input-border);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+    width: 100%;
+    transition: border-color 0.15s;
+  }
+  input[type="text"]:focus {
+    outline: none;
+    border-color: var(--focus);
+  }
+  input[type="text"]::placeholder { color: var(--fg2); opacity: 0.6; }
+  input[type="text"].error {
+    border-color: var(--error);
+  }
+  .error-msg {
+    color: var(--error);
+    font-size: 11px;
+    margin-top: 2px;
+  }
+
+  /* ── Radio Group ───────────────────────────────────────────────── */
+  .radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .radio-group label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--fg);
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .radio-group label:hover {
+    background: var(--list-hover);
+  }
+  /* Removed .radio-group label.selected style — radio buttons alone are sufficient */
+  .radio-group input[type="radio"] {
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .radio-desc {
+    color: var(--fg2);
+    font-size: 11px;
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+  }
+
+  /* ── Tags / Chips ──────────────────────────────────────────────── */
+  .tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 28px;
+    align-items: center;
+  }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--tag-bg);
+    border: 1px solid var(--tag-border);
+    border-radius: 4px;
+    padding: 2px 4px 2px 8px;
+    font-size: 12px;
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+    color: var(--fg);
+    transition: background 0.1s, border-color 0.1s;
+    max-width: 300px;
+    overflow: hidden;
+  }
+  .tag .tag-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tag .tag-remove {
+    background: none;
+    border: none;
+    color: var(--fg2);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 3px;
+    line-height: 1;
+    border-radius: 3px;
+    flex-shrink: 0;
+    opacity: 0.5;
+    transition: opacity 0.1s, color 0.1s, background 0.1s;
+  }
+  .tag .tag-remove:hover {
+    opacity: 1;
+    color: var(--error);
+    background: rgba(244,71,71,0.1);
+  }
+  .tag-add-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    white-space: nowrap;
+  }
+
+  /* ── Path display ──────────────────────────────────────────────── */
+  .path-display {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .path-display input {
+    flex: 1;
+  }
+  .path-display button {
+    flex-shrink: 0;
+  }
+
+  /* ── Full path preview ─────────────────────────────────────────── */
+  .full-path-preview {
+    margin-top: 6px;
+    padding: 6px 10px;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--fg2);
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+    word-break: break-all;
+  }
+
+  /* ── File Preview ──────────────────────────────────────────────── */
+  .file-preview {
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px 12px;
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--fg);
+    overflow-x: auto;
+  }
+  .file-preview .kw  { color: var(--vscode-symbolIcon-keywordForeground, #569cd6); }
+  .file-preview .fn  { color: var(--vscode-symbolIcon-functionForeground, #dcdcaa); }
+  .file-preview .str { color: var(--vscode-symbolIcon-stringForeground, #ce9178); }
+  .file-preview .cmt { color: var(--vscode-symbolIcon-commentForeground, #6a9955); font-style: italic; }
+  .file-preview .file-header {
+    color: var(--vscode-symbolIcon-keywordForeground, #569cd6);
+    font-weight: 600;
+    margin-bottom: 4px;
+    display: block;
+  }
+
+  /* ── Component Picker Dialog ───────────────────────────────────── */
+  .comp-picker-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(0,0,0,0.4);
+    justify-content: center;
+    align-items: center;
+  }
+  .comp-picker-overlay.open { display: flex; }
+  .comp-picker-dialog {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+    width: 420px;
+    max-height: 500px;
+    display: flex;
+    flex-direction: column;
+  }
+  .comp-picker-header {
+    padding: 12px 16px;
+    font-weight: 600;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+  }
+  .comp-picker-search {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .comp-picker-search input {
+    width: 100%;
+    background: var(--input-bg);
+    color: var(--input-fg);
+    border: 1px solid var(--input-border);
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+  .comp-picker-search input:focus { outline: none; border-color: var(--focus); }
+  .comp-picker-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 0;
+    max-height: 320px;
+  }
+  .comp-picker-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 16px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+    transition: background 0.1s;
+  }
+  .comp-picker-item:hover { background: var(--list-hover); }
+  .comp-picker-item.selected { background: var(--list-active); }
+  .comp-picker-item input { accent-color: var(--accent); cursor: pointer; }
+  .comp-picker-footer {
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  /* ── Scrollbar styling ─────────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--vscode-scrollbarSlider-background, rgba(121,121,121,0.4));
+    border-radius: 5px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--vscode-scrollbarSlider-hoverBackground, rgba(121,121,121,0.7));
+  }
+
+  /* ── Status bar ────────────────────────────────────────────────── */
+  .status-bar {
+    margin-top: 12px;
+    padding: 8px 14px;
+    border-radius: 4px;
+    font-size: 12px;
+    display: none;
+  }
+  .status-bar.error {
+    display: block;
+    background: rgba(244,71,71,0.1);
+    border: 1px solid var(--error);
+    color: var(--error);
+  }
+  .status-bar.success {
+    display: block;
+    background: rgba(78,201,176,0.1);
+    border: 1px solid var(--ok);
+    color: var(--ok);
+  }
+
+  /* ── Sub-label ─────────────────────────────────────────────────── */
+  .sub-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg2);
+    margin-bottom: 4px;
+    margin-top: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .sub-label:first-child { margin-top: 0; }
+
+  /* ── CMake Format Badge ─────────────────────────────────────────── */
+  .cmake-format-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  .cmake-format-badge.legacy {
+    background: rgba(204, 136, 0, 0.2);
+    color: #e8a020;
+    border: 1px solid rgba(204, 136, 0, 0.4);
+  }
+  .cmake-format-badge.modern {
+    background: rgba(78, 201, 176, 0.2);
+    color: #4ec9b0;
+    border: 1px solid rgba(78, 201, 176, 0.4);
+  }
+
+  /* ── Format Toggle ──────────────────────────────────────────────── */
+  .format-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--fg2);
+  }
+  .format-toggle select {
+    background: var(--input-bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .format-toggle select:focus {
+    outline: none;
+    border-color: var(--focus);
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────── -->
+<div class="header">
+  <div class="header-left">
+    <h2>
+      <span>&#x1F4E6; Create New ESP8266 Project</span>
+      <span class="cmake-format-badge modern" id="formatBadge">Modern</span>
+    </h2>
+    <p class="subtitle">ESP8266 RTOS SDK — CMake project template</p>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <span class="format-toggle">
+      Format: <select id="headerFormatSelect" onchange="setCmakeStyle(this.value)">
+        <option value="modern" selected>Modern (idf_component_register)</option>
+        <option value="legacy">Legacy (set/register)</option>
+      </select>
+    </span>
+    <button class="primary" id="createBtn" onclick="createProject()" disabled>&#x2714; Create Project</button>
+  </div>
+</div>
+
+<!-- ── Main Content ────────────────────────────────────────────── -->
+<div class="content" id="mainContent">
+
+  <!-- Section: Project Location -->
+  <div class="section" id="section_location">
+    <div class="section-header" onclick="toggleSection('location')">
+      <span class="chevron">&#9660;</span>
+      <span class="section-icon">&#x1F4C1;</span>
+      <span class="section-title">Project Location</span>
+    </div>
+    <div class="section-body">
+      <div class="form-row">
+        <span class="form-label">Parent folder
+          <span class="hint">Where to create the project</span>
+        </span>
+        <div class="form-field">
+          <div class="path-display">
+            <input type="text" id="parentDir" placeholder="Click Browse to select parent folder..." readonly
+                   onfocus="this.blur()">
+            <button onclick="pickParentFolder()">&#128193; Browse</button>
+          </div>
+        </div>
+      </div>
+      <div class="form-row">
+        <span class="form-label">Project name
+          <span class="hint">Letters, numbers, - and _</span>
+        </span>
+        <div class="form-field">
+          <input type="text" id="projectName" placeholder="my_esp_project"
+                 oninput="onProjectNameChange()">
+          <div class="error-msg" id="nameError" style="display:none"></div>
+        </div>
+      </div>
+      <div class="full-path-preview" id="fullPathPreview" style="display:none">
+        Project path: <span id="fullPathText"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section: Header Files -->
+  <div class="section" id="section_headers">
+    <div class="section-header" onclick="toggleSection('headers')">
+      <span class="chevron">&#9660;</span>
+      <span class="section-icon">&#x1F4C4;</span>
+      <span class="section-title">Header Files</span>
+    </div>
+    <div class="section-body">
+      <div class="radio-group" id="headersRadio">
+        <label data-value="include">
+          <input type="radio" name="headersChoice" value="include" checked
+                 onchange="setHeadersChoice('include')">
+          <span>&#x1F4C2; Separate <code>include/</code> folder</span>
+          <span class="radio-desc">INCLUDE_DIRS "include"</span>
+        </label>
+        <label data-value="dot">
+          <input type="radio" name="headersChoice" value="dot"
+                 onchange="setHeadersChoice('dot')">
+          <span>&#x1F4C4; Same folder as .c files</span>
+          <span class="radio-desc">INCLUDE_DIRS "."</span>
+        </label>
+        <label data-value="none">
+          <input type="radio" name="headersChoice" value="none"
+                 onchange="setHeadersChoice('none')">
+          <span>&#x274C; No header files</span>
+          <span class="radio-desc">no INCLUDE_DIRS</span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section: Excluded Components -->
+  <div class="section" id="section_exclude">
+    <div class="section-header" onclick="toggleSection('exclude')">
+      <span class="chevron">&#9660;</span>
+      <span class="section-icon">&#x1F6AB;</span>
+      <span class="section-title">Excluded Components</span>
+    </div>
+    <div class="section-body">
+      <div class="sub-label">SDK components to exclude from the build:</div>
+      <div class="tag-list" id="excludeComponents_tags"></div>
+      <div style="margin-top:6px">
+        <button class="tag-add-btn" onclick="pickExcludedComponents()">&#10133; Pick components</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section: Preview -->
+  <div class="section" id="section_preview">
+    <div class="section-header" onclick="toggleSection('preview')">
+      <span class="chevron">&#9660;</span>
+      <span class="section-icon">&#x1F441;</span>
+      <span class="section-title">Preview — Files to be created</span>
+    </div>
+    <div class="section-body">
+      <div id="previewContent"></div>
+    </div>
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar" id="statusBar"></div>
+
+</div>
+
+<!-- ── Component Picker Overlay ────────────────────────────────── -->
+<div class="comp-picker-overlay" id="compPickerOverlay">
+  <div class="comp-picker-dialog">
+    <div class="comp-picker-header">Pick Excluded Components</div>
+    <div class="comp-picker-search">
+      <input type="text" id="compPickerSearch" placeholder="Filter components..." oninput="filterComponents()">
+    </div>
+    <div class="comp-picker-list" id="compPickerList"></div>
+    <div class="comp-picker-footer">
+      <button onclick="closeCompPicker()">Cancel</button>
+      <button class="primary" onclick="confirmCompPicker()">Add Selected</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Globals ───────────────────────────────────────────────────
+const vscode = acquireVsCodeApi();
+const AVAILABLE_COMPONENTS = {{AVAILABLE_COMPONENTS}};
+
+let formData = {
+  parentDir: '',
+  projectName: '',
+  cmakeStyle: 'modern',
+  headersChoice: 'include',
+  excludeComponents: [],
+};
+
+let compPickerTarget = null;
+
+// ── Section Collapse ──────────────────────────────────────────
+const collapsedSections = new Set();
+
+function toggleSection(id) {
+  const el = document.getElementById('section_' + id);
+  if (!el) return;
+  el.classList.toggle('collapsed');
+  if (el.classList.contains('collapsed')) {
+    collapsedSections.add(id);
+  } else {
+    collapsedSections.delete(id);
+  }
+}
+
+// ── Escape HTML ───────────────────────────────────────────────
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+// ── Tag Rendering ─────────────────────────────────────────────
+function renderTags(field) {
+  const container = document.getElementById(field + '_tags');
+  if (!container) return;
+  const values = formData[field] || [];
+  container.innerHTML = values.map((v, i) =>
+    `<span class="tag">
+       <span class="tag-text">${esc(v)}</span>
+       <button class="tag-remove" onclick="removeTag('${field}',${i})" title="Remove">&#10005;</button>
+     </span>`
+  ).join('');
+}
+
+function removeTag(field, index) {
+  formData[field].splice(index, 1);
+  renderTags(field);
+  updatePreview();
+  updateCreateButton();
+}
+
+// ── Pick Parent Folder ────────────────────────────────────────
+function pickParentFolder() {
+  vscode.postMessage({ command: 'pickParentFolder' });
+}
+
+// ── Project Name ──────────────────────────────────────────────
+function onProjectNameChange() {
+  const input = document.getElementById('projectName');
+  const name = input.value.trim();
+  formData.projectName = name;
+
+  // Validate
+  const errorEl = document.getElementById('nameError');
+  if (name && !name.match(/^[a-zA-Z0-9_-]+$/)) {
+    errorEl.textContent = 'Invalid name — use only letters, numbers, - and _';
+    errorEl.style.display = 'block';
+    input.classList.add('error');
+  } else if (name) {
+    // Check if folder exists (ask extension)
+    vscode.postMessage({ command: 'checkFolderExists', parentDir: formData.parentDir, projectName: name });
+    errorEl.style.display = 'none';
+    input.classList.remove('error');
+  } else {
+    errorEl.style.display = 'none';
+    input.classList.remove('error');
+  }
+
+  updateFullPathPreview();
+  updatePreview();
+  updateCreateButton();
+}
+
+// ── CMake Style ───────────────────────────────────────────────
+function setCmakeStyle(value) {
+  formData.cmakeStyle = value;
+
+  // Sync both select elements
+  const headerSelect = document.getElementById('headerFormatSelect');
+  if (headerSelect) headerSelect.value = value;
+
+  // Update badge
+  updateFormatBadge();
+
+  updatePreview();
+}
+
+function updateFormatBadge() {
+  const badge = document.getElementById('formatBadge');
+  if (!badge) return;
+  badge.textContent = formData.cmakeStyle === 'legacy' ? 'Legacy' : 'Modern';
+  badge.className = 'cmake-format-badge ' + (formData.cmakeStyle || 'modern');
+}
+
+// ── Headers Choice ────────────────────────────────────────────
+function setHeadersChoice(value) {
+  formData.headersChoice = value;
+  // No label styling needed — radio buttons show selection state
+  updatePreview();
+}
+
+// ── Full Path Preview ─────────────────────────────────────────
+function updateFullPathPreview() {
+  const preview = document.getElementById('fullPathPreview');
+  const text = document.getElementById('fullPathText');
+  if (formData.parentDir && formData.projectName) {
+    const fullPath = formData.parentDir + '/' + formData.projectName;
+    text.textContent = fullPath;
+    preview.style.display = 'block';
+  } else {
+    preview.style.display = 'none';
+  }
+}
+
+// ── Create Button State ───────────────────────────────────────
+function updateCreateButton() {
+  const btn = document.getElementById('createBtn');
+  const valid = formData.parentDir && formData.projectName &&
+               formData.projectName.match(/^[a-zA-Z0-9_-]+$/);
+  btn.disabled = !valid;
+}
+
+// ── Preview ───────────────────────────────────────────────────
+function updatePreview() {
+  const container = document.getElementById('previewContent');
+  const name = formData.projectName || 'my_project';
+  const style = formData.cmakeStyle || 'legacy';
+
+  const excludeLine = formData.excludeComponents.length > 0
+    ? `\n<span class="kw">set</span>(EXCLUDE_COMPONENTS ${formData.excludeComponents.map(c => `<span class="str">${esc(c)}</span>`).join(' ')})\n`
+    : '';
+
+  // ── Root CMakeLists.txt ─────────────────────────────────────
+  let rootCmake = `<span class="file-header">CMakeLists.txt</span>`;
+  if (style === 'modern') {
+    rootCmake += `<span class="kw">cmake_minimum_required</span>(<span class="str">VERSION 3.16</span>)\n\n`;
+  } else {
+    rootCmake += `<span class="kw">cmake_minimum_required</span>(<span class="str">VERSION 3.5</span>)\n\n`;
+  }
+  rootCmake += `<span class="kw">include</span>(<span class="str">$ENV{IDF_PATH}</span>/tools/cmake/project.cmake)\n`;
+  rootCmake += excludeLine;
+  rootCmake += `<span class="kw">project</span>(<span class="str">${esc(name)}</span>)`;
+
+  // ── main/CMakeLists.txt — varies by style ───────────────────
+  let mainCmake = `\n\n<span class="file-header">main/CMakeLists.txt</span>`;
+
+  if (style === 'modern') {
+    // Modern: idf_component_register(SRCS ... INCLUDE_DIRS ...)
+    const includeDir = formData.headersChoice === 'include' ? '"include"'
+                    : formData.headersChoice === 'dot'     ? '"."'
+                    : null;
+    if (includeDir) {
+      mainCmake += `<span class="fn">idf_component_register</span>(\n`;
+      mainCmake += `    <span class="kw">SRCS</span> <span class="str">"main.c"</span>\n`;
+      mainCmake += `    <span class="kw">INCLUDE_DIRS</span> <span class="str">${esc(includeDir)}</span>\n`;
+      mainCmake += `)`;
+    } else {
+      mainCmake += `<span class="fn">idf_component_register</span>(\n`;
+      mainCmake += `    <span class="kw">SRCS</span> <span class="str">"main.c"</span>\n`;
+      mainCmake += `)`;
+    }
+  } else {
+    // Legacy: register_component() + COMPONENT_SRCS / COMPONENT_ADD_INCLUDEDIRS
+    const incLineLegacy = formData.headersChoice === 'include' ? '\nset(COMPONENT_ADD_INCLUDEDIRS "include")'
+                  : formData.headersChoice === 'dot'     ? '\nset(COMPONENT_ADD_INCLUDEDIRS ".")'
+                  : '';
+    mainCmake += `<span class="kw">set</span>(COMPONENT_SRCS <span class="str">"main.c"</span>)${incLineLegacy}\n\n`;
+    mainCmake += `<span class="fn">register_component</span>()`;
+  }
+
+  // ── main/main.c ─────────────────────────────────────────────
+  let mainC = `\n\n<span class="file-header">main/main.c</span>`;
+  mainC += `<span class="cmt">#include &lt;stdio.h&gt;</span>\n`;
+  mainC += `<span class="cmt">#include "freertos/FreeRTOS.h"</span>\n`;
+  mainC += `<span class="cmt">#include "freertos/task.h"</span>\n\n`;
+  mainC += `<span class="kw">void</span> <span class="fn">app_main</span>()\n{\n`;
+  mainC += `    <span class="fn">printf</span>(<span class="str">"Hello from ${esc(name)}!\\n"</span>);\n`;
+  mainC += `    <span class="kw">while</span> (<span class="str">1</span>) {\n`;
+  mainC += `        <span class="fn">vTaskDelay</span>(<span class="str">1000</span> / portTICK_PERIOD_MS);\n`;
+  mainC += `    }\n}`;
+
+  // ── Header file ─────────────────────────────────────────────
+  let headerContent = '';
+  const showHeader = formData.headersChoice !== 'none';
+  if (showHeader) {
+    const guard = name.toUpperCase().replace(/[^A-Z0-9]/g, '_') + '_H';
+    const headerPath = formData.headersChoice === 'include' ? 'main/include/' : 'main/';
+    headerContent = `\n\n<span class="file-header">${headerPath}${esc(name)}.h</span>`;
+    headerContent += `<span class="cmt">#ifndef ${guard}</span>\n`;
+    headerContent += `<span class="cmt">#define ${guard}</span>\n\n`;
+    headerContent += `<span class="cmt">// TODO: declare ${esc(name)} API</span>\n\n`;
+    headerContent += `<span class="cmt">#endif</span> // ${guard}`;
+  }
+
+  container.innerHTML = `<div class="file-preview">${rootCmake}${mainCmake}${mainC}${headerContent}</div>`;
+}
+
+// ── Component Picker ──────────────────────────────────────────
+function pickExcludedComponents() {
+  compPickerTarget = 'excludeComponents';
+  const overlay = document.getElementById('compPickerOverlay');
+  const search = document.getElementById('compPickerSearch');
+  const currentValues = new Set(formData.excludeComponents || []);
+
+  renderCompPickerList(AVAILABLE_COMPONENTS, currentValues);
+  search.value = '';
+  overlay.classList.add('open');
+  setTimeout(() => search.focus(), 100);
+}
+
+function renderCompPickerList(components, selectedSet) {
+  const list = document.getElementById('compPickerList');
+  list.innerHTML = components.map(c =>
+    `<div class="comp-picker-item${selectedSet.has(c) ? ' selected' : ''}" data-component="${esc(c)}">
+       <input type="checkbox" ${selectedSet.has(c) ? 'checked' : ''}>
+       <span>${esc(c)}</span>
+     </div>`
+  ).join('');
+
+  list.querySelectorAll('.comp-picker-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const cb = item.querySelector('input');
+      cb.checked = !cb.checked;
+      item.classList.toggle('selected', cb.checked);
+    });
+  });
+}
+
+function filterComponents() {
+  const query = document.getElementById('compPickerSearch').value.toLowerCase();
+  const list = document.getElementById('compPickerList');
+  if (!list) return;
+  list.querySelectorAll('.comp-picker-item').forEach(item => {
+    const name = item.dataset.component || '';
+    item.style.display = name.toLowerCase().includes(query) ? '' : 'none';
+  });
+}
+
+function closeCompPicker() {
+  document.getElementById('compPickerOverlay').classList.remove('open');
+  compPickerTarget = null;
+}
+
+function confirmCompPicker() {
+  const list = document.getElementById('compPickerList');
+  const selected = [];
+  list.querySelectorAll('.comp-picker-item input:checked').forEach(cb => {
+    selected.push(cb.parentElement.dataset.component);
+  });
+
+  if (!compPickerTarget) { closeCompPicker(); return; }
+
+  // Replace with selected (not append)
+  formData[compPickerTarget] = selected;
+
+  renderTags(compPickerTarget);
+  updatePreview();
+  updateCreateButton();
+  closeCompPicker();
+}
+
+// ── Create Project ────────────────────────────────────────────
+function createProject() {
+  if (!formData.parentDir || !formData.projectName) return;
+  if (!formData.projectName.match(/^[a-zA-Z0-9_-]+$/)) return;
+
+  const btn = document.getElementById('createBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Creating...';
+
+  vscode.postMessage({
+    command: 'createProject',
+    data: {
+      parentDir: formData.parentDir,
+      projectName: formData.projectName,
+      cmakeStyle: formData.cmakeStyle || 'legacy',
+      headersChoice: formData.headersChoice,
+      excludeComponents: formData.excludeComponents || [],
+    }
+  });
+}
+
+// ── Show Status ───────────────────────────────────────────────
+function showStatus(type, message) {
+  const bar = document.getElementById('statusBar');
+  bar.className = 'status-bar ' + type;
+  bar.textContent = message;
+}
+
+// ── Incoming Messages ─────────────────────────────────────────
+window.addEventListener('message', event => {
+  const msg = event.data;
+
+  if (msg.command === 'setParentFolder') {
+    formData.parentDir = msg.path;
+    document.getElementById('parentDir').value = msg.path;
+    updateFullPathPreview();
+    updatePreview();
+    updateCreateButton();
+  }
+
+  if (msg.command === 'folderExistsResult') {
+    const input = document.getElementById('projectName');
+    const errorEl = document.getElementById('nameError');
+    if (msg.exists) {
+      errorEl.textContent = 'Folder already exists!';
+      errorEl.style.display = 'block';
+      input.classList.add('error');
+    } else {
+      errorEl.style.display = 'none';
+      input.classList.remove('error');
+    }
+    updateCreateButton();
+  }
+
+  if (msg.command === 'projectCreated') {
+    // Panel will be closed by the extension — just show brief status
+    showStatus('success', `✅ Project "${msg.projectName}" created successfully!`);
+  }
+
+  if (msg.command === 'projectCreateError') {
+    showStatus('error', `❌ ${msg.error}`);
+    const btn = document.getElementById('createBtn');
+    btn.textContent = '✔ Create Project';
+    btn.disabled = false;
+  }
+
+  if (msg.command === 'setPickedComponents') {
+    const components = msg.components || [];
+    const field = msg.type === 'exclude' ? 'excludeComponents' : 'excludeComponents'; // only 'exclude' type is used in New Project
+    formData[field] = components;
+    renderTags(field);
+    updatePreview();
+    updateCreateButton();
+  }
+});
+
+// ── Initialize ────────────────────────────────────────────────
+function init() {
+  renderTags('excludeComponents');
+  updatePreview();
+  updateCreateButton();
+}
+
+init();
+</script>
+</body>
+</html>

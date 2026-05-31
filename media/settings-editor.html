@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<title>ESP — Settings</title>
+<style>
+  :root {
+    --bg:           var(--vscode-editor-background);
+    --bg2:          var(--vscode-sideBar-background, var(--vscode-editor-background));
+    --fg:           var(--vscode-editor-foreground);
+    --fg2:          var(--vscode-descriptionForeground);
+    --input-bg:     var(--vscode-input-background);
+    --input-fg:     var(--vscode-input-foreground);
+    --input-border: var(--vscode-input-border, var(--vscode-panel-border, #3e3e42));
+    --btn-bg:       var(--vscode-button-background, #007acc);
+    --btn-fg:       var(--vscode-button-foreground, #fff);
+    --btn-hover:    var(--vscode-button-hoverBackground, #0098ff);
+    --btn2-bg:      var(--vscode-button-secondaryBackground, var(--vscode-editor-background));
+    --btn2-fg:      var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
+    --btn2-hover:   var(--vscode-button-secondaryHoverBackground, var(--vscode-input-background));
+    --border:       var(--vscode-widget-border, var(--vscode-panel-border, #3e3e42));
+    --focus:        var(--vscode-focusBorder, #007fd4);
+    --accent:       var(--vscode-button-background, #007acc);
+    --list-active:  var(--vscode-list-activeSelectionBackground, rgba(0,120,215,0.15));
+    --list-hover:   var(--vscode-list-hoverBackground, rgba(128,128,128,0.1));
+    --error:        var(--vscode-editorError-foreground, #f44747);
+    --ok:           var(--vscode-terminal-ansiGreen, #4ec9b0);
+    --tag-bg:       var(--vscode-input-background, #2d2d30);
+    --tag-border:   var(--vscode-input-border, #3e3e42);
+    --tag-hover:    var(--vscode-list-hoverBackground, rgba(128,128,128,0.1));
+    --section-bg:   var(--vscode-sideBar-background, var(--vscode-editor-background));
+    --tab-active-bg: var(--vscode-tab-activeBackground, var(--vscode-editor-background));
+    --tab-inactive-bg: var(--vscode-tab-inactiveBackground, var(--vscode-sideBar-background));
+    --tab-border:   var(--vscode-tab-border, var(--vscode-panel-border, #3e3e42));
+    --tab-active-border-top: var(--vscode-tab-activeModifiedBorder, var(--accent));
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
+    font-size: var(--vscode-font-size, 13px);
+    line-height: 1.5;
+    padding: 0;
+    position: relative;
+  }
+
+  /* ── Header ────────────────────────────────────────────────────── */
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+  }
+  .header-left { flex: 1; min-width: 0; }
+  .header h2 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--fg);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .header .subtitle {
+    color: var(--fg2);
+    font-size: 11px;
+    margin-top: 2px;
+  }
+
+  /* ── Buttons ───────────────────────────────────────────────────── */
+  button {
+    background: var(--btn2-bg);
+    color: var(--btn2-fg);
+    border: 1px solid var(--border);
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  button:hover { background: var(--btn2-hover); }
+  button:focus-visible { outline: 1px solid var(--focus); outline-offset: 1px; }
+  button.primary {
+    background: var(--btn-bg);
+    border-color: var(--btn-bg);
+    color: var(--btn-fg);
+  }
+  button.primary:hover { background: var(--btn-hover); border-color: var(--btn-hover); }
+  button.primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* ── Tab Navigation ────────────────────────────────────────────── */
+  .tab-nav {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    background: var(--tab-inactive-bg);
+    padding: 0 20px;
+  }
+  .tab-btn {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--fg2);
+    padding: 8px 20px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    position: relative;
+  }
+  .tab-btn:hover {
+    color: var(--fg);
+    background: var(--list-hover);
+  }
+  .tab-btn:focus-visible {
+    outline: 1px solid var(--focus);
+    outline-offset: -1px;
+  }
+  .tab-btn.active {
+    color: var(--fg);
+    border-bottom-color: var(--tab-active-border-top);
+    background: var(--tab-active-bg);
+  }
+
+  /* ── Tab Content ───────────────────────────────────────────────── */
+  .tab-content {
+    display: none;
+  }
+  .tab-content.active {
+    display: block;
+  }
+
+  /* ── Main Content ──────────────────────────────────────────────── */
+  .content {
+    padding: 16px 20px 40px 20px;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+
+  /* ── Collapsible Section ───────────────────────────────────────── */
+  .section {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 12px;
+    background: var(--section-bg);
+    overflow: hidden;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+    user-select: none;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--fg);
+    transition: background 0.1s;
+  }
+  .section-header:hover { background: var(--list-hover); }
+  .section-header .chevron {
+    font-size: 12px;
+    transition: transform 0.2s ease;
+    color: var(--fg2);
+    width: 16px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .section.collapsed .chevron { transform: rotate(-90deg); }
+  .section-header .section-icon { font-size: 14px; flex-shrink: 0; }
+  .section-header .section-title { flex: 1; }
+  .section-body {
+    padding: 10px 14px 14px 14px;
+    overflow: hidden;
+    transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
+    max-height: 2000px;
+    opacity: 1;
+  }
+  .section.collapsed .section-body {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  /* ── Form Row ──────────────────────────────────────────────────── */
+  .form-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .form-label {
+    min-width: 140px;
+    padding-top: 5px;
+    font-size: 12px;
+    color: var(--fg);
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .form-label .hint {
+    display: block;
+    font-weight: 400;
+    color: var(--fg2);
+    font-size: 11px;
+    margin-top: 1px;
+  }
+  .form-field { flex: 1; min-width: 0; }
+
+
+
+  /* ── Radio Group ───────────────────────────────────────────────── */
+  .radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 4px;
+  }
+  .radio-group label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--fg);
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .radio-group label:hover { background: var(--list-hover); }
+  .radio-group input[type="radio"] {
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .radio-desc {
+    color: var(--fg2);
+    font-size: 11px;
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+  }
+
+  /* ── Checkbox Group ────────────────────────────────────────────── */
+  .checkbox-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 4px;
+  }
+  .checkbox-group label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--fg);
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .checkbox-group label:hover { background: var(--list-hover); }
+  .checkbox-group input[type="checkbox"] {
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+
+
+  /* ── Command Row (per-command settings) ────────────────────────── */
+  .command-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .command-row:last-child { border-bottom: none; }
+  .command-name {
+    min-width: 200px;
+    padding-top: 5px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--fg);
+    flex-shrink: 0;
+  }
+  .command-name .cmd-id {
+    display: block;
+    font-weight: 400;
+    color: var(--fg2);
+    font-size: 10px;
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+  }
+  .command-actions {
+    display: flex;
+    gap: 20px;
+    flex: 1;
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+  .action-group {
+    min-width: 160px;
+  }
+  .action-group-title {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--fg2);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+
+  /* ── Compact Radio ────────────────────────────────────────────── */
+  .radio-compact {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .radio-compact label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    color: var(--fg);
+    padding: 2px 6px;
+    border-radius: 3px;
+    border: 1px solid transparent;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .radio-compact label:hover { background: var(--list-hover); }
+  .radio-compact input[type="radio"] {
+    accent-color: var(--accent);
+    cursor: pointer;
+    width: 12px;
+    height: 12px;
+  }
+
+  /* ── Scrollbar styling ─────────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--vscode-scrollbarSlider-background, rgba(121,121,121,0.4));
+    border-radius: 5px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--vscode-scrollbarSlider-hoverBackground, rgba(121,121,121,0.7));
+  }
+
+  /* ── Status bar ────────────────────────────────────────────────── */
+  .status-bar {
+    margin-top: 12px;
+    padding: 8px 14px;
+    border-radius: 4px;
+    font-size: 12px;
+    display: none;
+  }
+  .status-bar.error {
+    display: block;
+    background: rgba(244,71,71,0.1);
+    border: 1px solid var(--error);
+    color: var(--error);
+  }
+  .status-bar.success {
+    display: block;
+    background: rgba(78,201,176,0.1);
+    border: 1px solid var(--ok);
+    color: var(--ok);
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────── -->
+<div class="header">
+  <div class="header-left">
+    <h2>
+      <span>&#x2699; ESP Settings</span>
+    </h2>
+    <p class="subtitle">ESP8266 RTOS SDK — Configure per-command build, flash, and filesystem settings</p>
+  </div>
+  <button class="primary" id="saveBtn" onclick="saveSettings()">&#x2714; Save Settings</button>
+</div>
+
+<!-- ── Tab Navigation ──────────────────────────────────────────── -->
+<div class="tab-nav">
+  <button class="tab-btn active" data-tab="build" onclick="switchTab('build')">&#x1F528; Build</button>
+  <button class="tab-btn" data-tab="flash" onclick="switchTab('flash')">&#x26A1; Flash</button>
+</div>
+
+<!-- ── Main Content ────────────────────────────────────────────── -->
+<div class="content" id="mainContent">
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- TAB: Build                                                 -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <div class="tab-content active" id="tab-build">
+
+    <!-- Section: Per-Command Build Actions -->
+    <div class="section" id="section_buildCommands">
+      <div class="section-header" onclick="toggleSection('buildCommands')">
+        <span class="chevron">&#9660;</span>
+        <span class="section-icon">&#x1F528;</span>
+        <span class="section-title">Build Commands</span>
+      </div>
+      <div class="section-body">
+
+        <!-- Build -->
+        <div class="command-row">
+          <div class="command-name">Build<span class="cmd-id">idf.py build</span></div>
+          <div class="command-actions">
+            <div class="action-group">
+              <div class="action-group-title">Before</div>
+              <div class="radio-compact">
+                <label><input type="radio" name="preBuildAction" value="none" onchange="setRadio('preBuildAction','none')"> None</label>
+                <label><input type="radio" name="preBuildAction" value="clean" onchange="setRadio('preBuildAction','clean')"> Clean</label>
+                <label><input type="radio" name="preBuildAction" value="fullclean" onchange="setRadio('preBuildAction','fullclean')"> Fullclean</label>
+              </div>
+            </div>
+            <div class="action-group">
+              <div class="action-group-title">After</div>
+              <div class="radio-compact">
+                <label><input type="radio" name="postBuildAction" value="none" onchange="setRadio('postBuildAction','none')"> None</label>
+                <label><input type="radio" name="postBuildAction" value="flash" onchange="setRadio('postBuildAction','flash')"> Flash</label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Build App -->
+        <div class="command-row">
+          <div class="command-name">Build App<span class="cmd-id">idf.py app</span></div>
+          <div class="command-actions">
+            <div class="action-group">
+              <div class="action-group-title">Before</div>
+              <div class="radio-compact">
+                <label><input type="radio" name="preBuildAppAction" value="none" onchange="setRadio('preBuildAppAction','none')"> None</label>
+                <label><input type="radio" name="preBuildAppAction" value="clean" onchange="setRadio('preBuildAppAction','clean')"> Clean</label>
+                <label><input type="radio" name="preBuildAppAction" value="fullclean" onchange="setRadio('preBuildAppAction','fullclean')"> Fullclean</label>
+              </div>
+            </div>
+            <div class="action-group">
+              <div class="action-group-title">After</div>
+              <div class="radio-compact">
+                <label><input type="radio" name="postBuildAppAction" value="none" onchange="setRadio('postBuildAppAction','none')"> None</label>
+                <label><input type="radio" name="postBuildAppAction" value="app_flash" onchange="setRadio('postBuildAppAction','app_flash')"> App Flash</label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Build Bootloader -->
+        <div class="command-row">
+          <div class="command-name">Build Bootloader<span class="cmd-id">idf.py bootloader</span></div>
+          <div class="command-actions">
+            <div class="action-group">
+              <div class="action-group-title">Before</div>
+              <div class="radio-compact">
+                <label><input type="radio" name="preBuildBootloaderAction" value="none" onchange="setRadio('preBuildBootloaderAction','none')"> None</label>
+                <label><input type="radio" name="preBuildBootloaderAction" value="clean" onchange="setRadio('preBuildBootloaderAction','clean')"> Clean</label>
+                <label><input type="radio" name="preBuildBootloaderAction" value="fullclean" onchange="setRadio('preBuildBootloaderAction','fullclean')"> Fullclean</label>
+              </div>
+            </div>
+            <div class="action-group">
+              <div class="action-group-title">After</div>
+              <div class="radio-compact">
+                <label><input type="radio" name="postBuildBootloaderAction" value="none" onchange="setRadio('postBuildBootloaderAction','none')"> None</label>
+                <label><input type="radio" name="postBuildBootloaderAction" value="flash_bootloader" onchange="setRadio('postBuildBootloaderAction','flash_bootloader')"> Flash Bootloader</label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Build Partition Table -->
+        <div class="command-row">
+          <div class="command-name">Build Partition<span class="cmd-id">idf.py partition_table</span></div>
+          <div class="command-actions">
+            <div class="action-group">
+              <div class="action-group-title">Before</div>
+              <div class="radio-compact">
+                <label><input type="radio" name="preBuildPartitionAction" value="none" onchange="setRadio('preBuildPartitionAction','none')"> None</label>
+                <label><input type="radio" name="preBuildPartitionAction" value="clean" onchange="setRadio('preBuildPartitionAction','clean')"> Clean</label>
+                <label><input type="radio" name="preBuildPartitionAction" value="fullclean" onchange="setRadio('preBuildPartitionAction','fullclean')"> Fullclean</label>
+              </div>
+            </div>
+            <div class="action-group">
+              <div class="action-group-title">After</div>
+              <div class="radio-compact">
+                <label><input type="radio" name="postBuildPartitionAction" value="none" onchange="setRadio('postBuildPartitionAction','none')"> None</label>
+                <label><input type="radio" name="postBuildPartitionAction" value="flash_partition" onchange="setRadio('postBuildPartitionAction','flash_partition')"> Flash Partition</label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Section: Post-Build Analysis (only for Build) -->
+    <div class="section" id="section_analysis">
+      <div class="section-header" onclick="toggleSection('analysis')">
+        <span class="chevron">&#9660;</span>
+        <span class="section-icon">&#x1F4CA;</span>
+        <span class="section-title">Post-Build Analysis (Build only)</span>
+      </div>
+      <div class="section-body">
+        <div class="form-row">
+          <span class="form-label">Analysis commands
+            <span class="hint">Run after successful Build</span>
+          </span>
+          <div class="form-field">
+            <div class="checkbox-group" id="analysisCheckboxes">
+              <label>
+                <input type="checkbox" value="size"
+                       onchange="toggleAnalysis('size')">
+                <span>&#x1F4CF; Size</span>
+                <span class="radio-desc">idf.py size</span>
+              </label>
+              <label>
+                <input type="checkbox" value="size-components"
+                       onchange="toggleAnalysis('size-components')">
+                <span>&#x1F4CF; Size Components</span>
+                <span class="radio-desc">idf.py size-components</span>
+              </label>
+              <label>
+                <input type="checkbox" value="size-files"
+                       onchange="toggleAnalysis('size-files')">
+                <span>&#x1F4CF; Size Files</span>
+                <span class="radio-desc">idf.py size-files</span>
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <!-- TAB: Flash                                                 -->
+  <!-- ═══════════════════════════════════════════════════════════ -->
+  <div class="tab-content" id="tab-flash">
+
+    <!-- Section: Per-Command Flash Actions -->
+    <div class="section" id="section_flashCommands">
+      <div class="section-header" onclick="toggleSection('flashCommands')">
+        <span class="chevron">&#9660;</span>
+        <span class="section-icon">&#x26A1;</span>
+        <span class="section-title">Flash Commands</span>
+      </div>
+      <div class="section-body">
+
+        <!-- Flash -->
+        <div class="command-row">
+          <div class="command-name">Flash<span class="cmd-id">idf.py flash</span></div>
+          <div class="command-actions">
+            <div class="action-group">
+              <div class="action-group-title">Before</div>
+              <div class="radio-compact">
+                <label><input type="radio" name="preFlashAction" value="none" onchange="setRadio('preFlashAction','none')"> None</label>
+                <label><input type="radio" name="preFlashAction" value="erase" onchange="setRadio('preFlashAction','erase')"> Erase</label>
+              </div>
+            </div>
+            <div class="action-group">
+              <div class="action-group-title">After</div>
+              <div class="radio-compact">
+                <label><input type="radio" name="postFlashAction" value="none" onchange="setRadio('postFlashAction','none')"> None</label>
+                <label><input type="radio" name="postFlashAction" value="monitor" onchange="setRadio('postFlashAction','monitor')"> Monitor</label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Flash App -->
+        <div class="command-row">
+          <div class="command-name">Flash App<span class="cmd-id">idf.py app-flash</span></div>
+          <div class="command-actions">
+            <div class="action-group">
+              <div class="action-group-title">Before</div>
+              <div style="font-size:11px;color:var(--fg2);padding-top:2px;">N/A</div>
+            </div>
+            <div class="action-group">
+              <div class="action-group-title">After</div>
+              <div class="radio-compact">
+                <label><input type="radio" name="postFlashAppAction" value="none" onchange="setRadio('postFlashAppAction','none')"> None</label>
+                <label><input type="radio" name="postFlashAppAction" value="monitor" onchange="setRadio('postFlashAppAction','monitor')"> Monitor</label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Flash Bootloader -->
+        <div class="command-row">
+          <div class="command-name">Flash Bootloader<span class="cmd-id">idf.py bootloader-flash</span></div>
+          <div class="command-actions">
+            <div class="action-group">
+              <div class="action-group-title">Before</div>
+              <div style="font-size:11px;color:var(--fg2);padding-top:2px;">N/A</div>
+            </div>
+            <div class="action-group">
+              <div class="action-group-title">After</div>
+              <div class="radio-compact">
+                <label><input type="radio" name="postFlashBootloaderAction" value="none" onchange="setRadio('postFlashBootloaderAction','none')"> None</label>
+                <label><input type="radio" name="postFlashBootloaderAction" value="monitor" onchange="setRadio('postFlashBootloaderAction','monitor')"> Monitor</label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Flash Partition Table -->
+        <div class="command-row">
+          <div class="command-name">Flash Partition<span class="cmd-id">idf.py partition_table-flash</span></div>
+          <div class="command-actions">
+            <div class="action-group">
+              <div class="action-group-title">Before</div>
+              <div style="font-size:11px;color:var(--fg2);padding-top:2px;">N/A</div>
+            </div>
+            <div class="action-group">
+              <div class="action-group-title">After</div>
+              <div class="radio-compact">
+                <label><input type="radio" name="postFlashPartitionAction" value="none" onchange="setRadio('postFlashPartitionAction','none')"> None</label>
+                <label><input type="radio" name="postFlashPartitionAction" value="monitor" onchange="setRadio('postFlashPartitionAction','monitor')"> Monitor</label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Flash File System -->
+        <div class="command-row">
+          <div class="command-name">Flash File System<span class="cmd-id">esptool write_flash</span></div>
+          <div class="command-actions">
+            <div class="action-group">
+              <div class="action-group-title">Before</div>
+              <div style="font-size:11px;color:var(--fg2);padding-top:2px;">N/A</div>
+            </div>
+            <div class="action-group">
+              <div class="action-group-title">After</div>
+              <div class="radio-compact">
+                <label><input type="radio" name="postFlashFsAction" value="none" onchange="setRadio('postFlashFsAction','none')"> None</label>
+                <label><input type="radio" name="postFlashFsAction" value="monitor" onchange="setRadio('postFlashFsAction','monitor')"> Monitor</label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+
+
+  </div>
+
+  <!-- Status bar -->
+  <div class="status-bar" id="statusBar"></div>
+
+</div>
+
+<script>
+// ── Globals ───────────────────────────────────────────────────
+const vscode = acquireVsCodeApi();
+let settings = {{INITIAL_SETTINGS}};
+let currentTab = '{{INITIAL_MODE}}';
+
+// ── Tab Switching ─────────────────────────────────────────────
+function switchTab(tab) {
+  // Map mode names to tab IDs
+  const tabMap = { build: 'build', flash: 'flash', flashfs: 'flash' };
+  const tabId = tabMap[tab] || tab;
+
+  // Update tab buttons
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.tab === tabId);
+  });
+
+  // Update tab content
+  document.querySelectorAll('.tab-content').forEach(content => {
+    content.classList.remove('active');
+  });
+  const targetContent = document.getElementById('tab-' + tabId);
+  if (targetContent) targetContent.classList.add('active');
+
+  currentTab = tabId;
+}
+
+// ── Section Collapse ──────────────────────────────────────────
+const collapsedSections = new Set();
+
+function toggleSection(id) {
+  const el = document.getElementById('section_' + id);
+  if (!el) return;
+  el.classList.toggle('collapsed');
+  if (el.classList.contains('collapsed')) {
+    collapsedSections.add(id);
+  } else {
+    collapsedSections.delete(id);
+  }
+}
+
+// ── Radio Group Helper ────────────────────────────────────────
+function setRadio(key, value) {
+  settings[key] = value;
+}
+
+// ── Analysis Checkbox Helper ──────────────────────────────────
+function toggleAnalysis(value) {
+  if (!settings.postBuildAnalysis) settings.postBuildAnalysis = [];
+  const idx = settings.postBuildAnalysis.indexOf(value);
+  if (idx >= 0) {
+    settings.postBuildAnalysis.splice(idx, 1);
+  } else {
+    settings.postBuildAnalysis.push(value);
+  }
+}
+
+// ── Apply Settings to UI ──────────────────────────────────────
+function applySettingsToUI(s) {
+  settings = s;
+
+  // All radio keys for per-command settings
+  const radioKeys = [
+    'preBuildAction', 'postBuildAction',
+    'preBuildAppAction', 'postBuildAppAction',
+    'preBuildBootloaderAction', 'postBuildBootloaderAction',
+    'preBuildPartitionAction', 'postBuildPartitionAction',
+    'preFlashAction', 'postFlashAction',
+    'postFlashAppAction',
+    'postFlashBootloaderAction',
+    'postFlashPartitionAction',
+    'postFlashFsAction',
+  ];
+
+  for (const key of radioKeys) {
+    const radios = document.querySelectorAll('input[name="' + key + '"]');
+    radios.forEach(r => { r.checked = (r.value === s[key]); });
+  }
+
+  // Analysis checkboxes
+  const analysisChecks = document.querySelectorAll('#analysisCheckboxes input[type="checkbox"]');
+  analysisChecks.forEach(cb => {
+    cb.checked = (s.postBuildAnalysis || []).includes(cb.value);
+  });
+
+
+}
+
+
+
+// ── Save Settings ─────────────────────────────────────────────
+function saveSettings() {
+  const btn = document.getElementById('saveBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Saving...';
+
+  vscode.postMessage({
+    command: 'saveSettings',
+    data: {
+      preBuildAction:      settings.preBuildAction,
+      postBuildAction:     settings.postBuildAction,
+      postBuildAnalysis:   settings.postBuildAnalysis || [],
+      preBuildAppAction:      settings.preBuildAppAction,
+      postBuildAppAction:     settings.postBuildAppAction,
+      preBuildBootloaderAction:      settings.preBuildBootloaderAction,
+      postBuildBootloaderAction:     settings.postBuildBootloaderAction,
+      preBuildPartitionAction:      settings.preBuildPartitionAction,
+      postBuildPartitionAction:     settings.postBuildPartitionAction,
+      preFlashAction:      settings.preFlashAction,
+      postFlashAction:     settings.postFlashAction,
+      postFlashAppAction:     settings.postFlashAppAction,
+      postFlashBootloaderAction:     settings.postFlashBootloaderAction,
+      postFlashPartitionAction:     settings.postFlashPartitionAction,
+      postFlashFsAction:   settings.postFlashFsAction,
+    }
+  });
+
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.textContent = '✔ Save Settings';
+  }, 1000);
+}
+
+// ── Show Status ───────────────────────────────────────────────
+function showStatus(type, message) {
+  const bar = document.getElementById('statusBar');
+  bar.className = 'status-bar ' + type;
+  bar.textContent = message;
+  // Auto-hide after 4 seconds
+  setTimeout(() => {
+    bar.className = 'status-bar';
+    bar.style.display = 'none';
+  }, 4000);
+}
+
+// ── Incoming Messages ─────────────────────────────────────────
+window.addEventListener('message', event => {
+  const msg = event.data;
+
+  if (msg.command === 'switchMode') {
+    switchTab(msg.mode);
+  }
+
+  if (msg.command === 'settingsUpdate') {
+    applySettingsToUI(msg.data);
+  }
+});
+
+// ── Initialize ────────────────────────────────────────────────
+function init() {
+  applySettingsToUI(settings);
+
+  // Switch to initial mode tab
+  const modeMap = { build: 'build', flash: 'flash', flashfs: 'flash' };
+  const initialTab = modeMap[currentTab] || 'build';
+  switchTab(initialTab);
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,1588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<title>ESP CMake Editor</title>
+<style>
+  :root {
+    --bg:           var(--vscode-editor-background);
+    --bg2:          var(--vscode-sideBar-background, var(--vscode-editor-background));
+    --fg:           var(--vscode-editor-foreground);
+    --fg2:          var(--vscode-descriptionForeground);
+    --input-bg:     var(--vscode-input-background);
+    --input-fg:     var(--vscode-input-foreground);
+    --input-border: var(--vscode-input-border, var(--vscode-panel-border, #3e3e42));
+    --btn-bg:       var(--vscode-button-background, #007acc);
+    --btn-fg:       var(--vscode-button-foreground, #fff);
+    --btn-hover:    var(--vscode-button-hoverBackground, #0098ff);
+    --btn2-bg:      var(--vscode-button-secondaryBackground, var(--vscode-editor-background));
+    --btn2-fg:      var(--vscode-button-secondaryForeground, var(--vscode-editor-foreground));
+    --btn2-hover:   var(--vscode-button-secondaryHoverBackground, var(--vscode-input-background));
+    --border:       var(--vscode-widget-border, var(--vscode-panel-border, #3e3e42));
+    --focus:        var(--vscode-focusBorder, #007fd4);
+    --accent:       var(--vscode-button-background, #007acc);
+    --accent2:      var(--vscode-button-hoverBackground, #0098ff);
+    --list-active:  var(--vscode-list-activeSelectionBackground, rgba(0,120,215,0.15));
+    --list-hover:   var(--vscode-list-hoverBackground, rgba(128,128,128,0.1));
+    --error:        var(--vscode-editorError-foreground, #f44747);
+    --warn:         var(--vscode-editorWarning-foreground, #cca700);
+    --ok:           var(--vscode-terminal-ansiGreen, #4ec9b0);
+    --badge-bg:     var(--vscode-badge-background, #4d4d4d);
+    --badge-fg:     var(--vscode-badge-foreground, #fff);
+    --tag-bg:       var(--vscode-input-background, #2d2d30);
+    --tag-border:   var(--vscode-input-border, #3e3e42);
+    --tag-hover:    var(--vscode-list-hoverBackground, rgba(128,128,128,0.1));
+    --section-bg:   var(--vscode-sideBar-background, var(--vscode-editor-background));
+    --code-keyword: var(--vscode-symbolIcon-keywordForeground, #569cd6);
+    --code-string:  var(--vscode-symbolIcon-stringForeground, #ce9178);
+    --code-func:    var(--vscode-symbolIcon-functionForeground, #dcdcaa);
+    --code-comment: var(--vscode-symbolIcon-commentForeground, #6a9955);
+    --code-var:     var(--vscode-symbolIcon-variableForeground, #9cdcfe);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--vscode-font-family, 'Segoe UI', sans-serif);
+    font-size: var(--vscode-font-size, 13px);
+    line-height: 1.5;
+    padding: 0;
+    position: relative;
+  }
+
+  /* ── Header ────────────────────────────────────────────────────── */
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+  }
+  .header-left { flex: 1; min-width: 0; }
+  .header h2 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--fg);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+  }
+  .header .subtitle {
+    color: var(--fg2);
+    font-size: 11px;
+    margin-top: 2px;
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dirty-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-left: 4px;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .dirty-dot.visible { opacity: 1; }
+
+  /* ── Buttons ───────────────────────────────────────────────────── */
+  button {
+    background: var(--btn2-bg);
+    color: var(--btn2-fg);
+    border: 1px solid var(--border);
+    padding: 4px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+    white-space: nowrap;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  button:hover { background: var(--btn2-hover); }
+  button:focus-visible { outline: 1px solid var(--focus); outline-offset: 1px; }
+  button.primary {
+    background: var(--btn-bg);
+    border-color: var(--btn-bg);
+    color: var(--btn-fg);
+  }
+  button.primary:hover { background: var(--btn-hover); border-color: var(--btn-hover); }
+  button.icon-btn {
+    background: none;
+    border: 1px solid transparent;
+    padding: 2px 6px;
+    font-size: 13px;
+    border-radius: 3px;
+    color: var(--fg2);
+  }
+  button.icon-btn:hover {
+    background: var(--tag-hover);
+    border-color: var(--border);
+  }
+
+  /* ── Main Content ──────────────────────────────────────────────── */
+  .content {
+    padding: 16px 20px 40px 20px;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+
+  /* ── Collapsible Section ───────────────────────────────────────── */
+  .section {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 12px;
+    background: var(--section-bg);
+    overflow: hidden;
+  }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    cursor: pointer;
+    user-select: none;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--fg);
+    transition: background 0.1s;
+  }
+  .section-header:hover { background: var(--list-hover); }
+  .section-header .chevron {
+    font-size: 12px;
+    transition: transform 0.2s ease;
+    color: var(--fg2);
+    width: 16px;
+    text-align: center;
+    flex-shrink: 0;
+  }
+  .section.collapsed .chevron { transform: rotate(-90deg); }
+  .section-header .section-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  .section-header .section-title { flex: 1; }
+  .section-body {
+    padding: 10px 14px 14px 14px;
+    overflow: hidden;
+    transition: max-height 0.25s ease, opacity 0.2s ease, padding 0.25s ease;
+    max-height: 2000px;
+    opacity: 1;
+  }
+  .section.collapsed .section-body {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  /* ── Form Row ──────────────────────────────────────────────────── */
+  .form-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .form-label {
+    min-width: 160px;
+    padding-top: 5px;
+    font-size: 12px;
+    color: var(--fg);
+    font-weight: 500;
+    flex-shrink: 0;
+  }
+  .form-label .hint {
+    display: block;
+    font-weight: 400;
+    color: var(--fg2);
+    font-size: 11px;
+    margin-top: 1px;
+  }
+  .form-field { flex: 1; min-width: 0; }
+
+  /* ── Input ─────────────────────────────────────────────────────── */
+  input[type="text"] {
+    background: var(--input-bg);
+    color: var(--input-fg);
+    border: 1px solid var(--input-border);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+    width: 100%;
+    transition: border-color 0.15s;
+  }
+  input[type="text"]:focus {
+    outline: none;
+    border-color: var(--focus);
+  }
+  input[type="text"]::placeholder { color: var(--fg2); opacity: 0.6; }
+
+  /* ── Radio Group ───────────────────────────────────────────────── */
+  .radio-group {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 10px;
+  }
+  .radio-group label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--fg);
+    padding: 4px 8px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .radio-group label:hover {
+    background: var(--list-hover);
+  }
+  .radio-group input[type="radio"] {
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+  /* ── Tags / Chips ──────────────────────────────────────────────── */
+  .tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    min-height: 28px;
+    align-items: center;
+  }
+  .tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--tag-bg);
+    border: 1px solid var(--tag-border);
+    border-radius: 4px;
+    padding: 2px 4px 2px 8px;
+    font-size: 12px;
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+    color: var(--fg);
+    transition: background 0.1s, border-color 0.1s;
+    max-width: 300px;
+    overflow: hidden;
+  }
+  .tag .tag-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tag:hover {
+    background: var(--tag-hover);
+    border-color: var(--accent);
+  }
+  .tag .tag-remove {
+    background: none;
+    border: none;
+    color: var(--fg2);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0 3px;
+    line-height: 1;
+    border-radius: 3px;
+    flex-shrink: 0;
+    opacity: 0.5;
+    transition: opacity 0.1s, color 0.1s, background 0.1s;
+  }
+  .tag .tag-remove:hover {
+    opacity: 1;
+    color: var(--error);
+    background: rgba(244,71,71,0.1);
+  }
+  .tag-add-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    white-space: nowrap;
+  }
+
+  /* ── Discovered Files Info ─────────────────────────────────────── */
+  .discovered-info {
+    margin-top: 8px;
+    padding: 6px 10px;
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 11px;
+    color: var(--fg2);
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+  }
+  .discovered-info .count {
+    color: var(--ok);
+    font-weight: 600;
+  }
+
+  /* ── CMake Preview ─────────────────────────────────────────────── */
+  .cmake-preview {
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px 14px;
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-all;
+    color: var(--fg);
+    overflow-x: auto;
+  }
+  .cmake-preview .kw  { color: var(--code-keyword); }
+  .cmake-preview .fn  { color: var(--code-func); }
+  .cmake-preview .str { color: var(--code-string); }
+  .cmake-preview .cmt { color: var(--code-comment); font-style: italic; }
+  .cmake-preview .var { color: var(--code-var); }
+
+  /* ── Sub-section labels ────────────────────────────────────────── */
+  .sub-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg2);
+    margin-bottom: 4px;
+    margin-top: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .sub-label:first-child { margin-top: 0; }
+
+  /* ── Inline Add ────────────────────────────────────────────────── */
+  .inline-add {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    align-items: center;
+  }
+  .inline-add input {
+    flex: 1;
+    min-width: 100px;
+  }
+
+  /* ── Scrollbar styling ─────────────────────────────────────────── */
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: var(--vscode-scrollbarSlider-background, rgba(121,121,121,0.4));
+    border-radius: 5px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--vscode-scrollbarSlider-hoverBackground, rgba(121,121,121,0.7));
+  }
+
+  /* ── Component Picker Dialog ───────────────────────────────────── */
+  .comp-picker-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    background: rgba(0,0,0,0.4);
+    justify-content: center;
+    align-items: center;
+  }
+  .comp-picker-overlay.open { display: flex; }
+  .comp-picker-dialog {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+    width: 420px;
+    max-height: 500px;
+    display: flex;
+    flex-direction: column;
+  }
+  .comp-picker-header {
+    padding: 12px 16px;
+    font-weight: 600;
+    font-size: 13px;
+    border-bottom: 1px solid var(--border);
+  }
+  .comp-picker-search {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .comp-picker-search input {
+    width: 100%;
+    background: var(--input-bg);
+    color: var(--input-fg);
+    border: 1px solid var(--input-border);
+    padding: 5px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+  .comp-picker-search input:focus { outline: none; border-color: var(--focus); }
+  .comp-picker-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 0;
+    max-height: 320px;
+  }
+  .comp-picker-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 16px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+    transition: background 0.1s;
+  }
+  .comp-picker-item:hover { background: var(--list-hover); }
+  .comp-picker-item.selected { background: var(--list-active); }
+  .comp-picker-item input { accent-color: var(--accent); cursor: pointer; }
+  .comp-picker-footer {
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  /* ── Busy state ──────────────────────────────────────────────── */
+  .busy-banner {
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: var(--vscode-editorWarning-background, rgba(204, 167, 0, 0.15));
+    border: 1px solid var(--warn);
+    border-radius: 4px;
+    margin-bottom: 12px;
+    font-size: 12px;
+    color: var(--warn);
+  }
+  .busy-banner.visible { display: flex; }
+  .busy-banner .spinner {
+    animation: spin 1s linear infinite;
+    font-size: 14px;
+  }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  button.primary:disabled,
+  button.primary[disabled] {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: var(--btn-bg);
+    border-color: var(--btn-bg);
+    color: var(--btn-fg);
+  }
+
+  /* ── Root-specific: project name ───────────────────────────────── */
+  .project-name-input {
+    max-width: 400px;
+  }
+
+  /* ── CMake Format Badge ─────────────────────────────────────────── */
+  .cmake-format-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+  .cmake-format-badge.legacy {
+    background: rgba(204, 136, 0, 0.2);
+    color: #e8a020;
+    border: 1px solid rgba(204, 136, 0, 0.4);
+  }
+  .cmake-format-badge.modern {
+    background: rgba(78, 201, 176, 0.2);
+    color: #4ec9b0;
+    border: 1px solid rgba(78, 201, 176, 0.4);
+  }
+
+  /* ── Format Toggle ──────────────────────────────────────────────── */
+  .format-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--fg2);
+  }
+  .format-toggle select {
+    background: var(--input-bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .format-toggle select:focus {
+    outline: none;
+    border-color: var(--focus);
+  }
+
+  /* ── Variable Reference Tag (orange) ─────────────────────────── */
+  .tag.var-ref {
+    background: rgba(232, 160, 32, 0.15);
+    border-color: rgba(232, 160, 32, 0.5);
+    color: #e8a020;
+  }
+  .tag.var-ref:hover {
+    background: rgba(232, 160, 32, 0.25);
+    border-color: #e8a020;
+  }
+  .tag.var-ref .tag-icon {
+    font-size: 11px;
+    opacity: 0.8;
+  }
+  .tag.var-ref .tag-text {
+    color: #e8a020;
+  }
+
+  /* ── Preamble Editor ──────────────────────────────────────────── */
+  .preamble-editor {
+    width: 100%;
+    min-height: 120px;
+    max-height: 400px;
+    background: var(--input-bg);
+    color: var(--input-fg);
+    border: 1px solid var(--input-border);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+    font-size: 12px;
+    line-height: 1.5;
+    resize: vertical;
+    tab-size: 4;
+    white-space: pre;
+    overflow: auto;
+  }
+  .preamble-editor:focus {
+    outline: none;
+    border-color: var(--focus);
+  }
+  .preamble-editor::placeholder {
+    color: var(--fg2);
+    opacity: 0.5;
+  }
+
+  /* ── Var Ref Warning ──────────────────────────────────────────── */
+  .var-ref-warning {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 5px 10px;
+    background: rgba(232, 160, 32, 0.1);
+    border: 1px solid rgba(232, 160, 32, 0.3);
+    border-radius: 4px;
+    font-size: 11px;
+    color: #e8a020;
+  }
+  .var-ref-warning .warn-icon {
+    flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────── -->
+<div class="header">
+  <div class="header-left">
+    <h2>
+      <span>ESP CMake Editor</span>
+      <span id="componentLabel">— {{COMPONENT_NAME}}/CMakeLists.txt</span>
+      <span class="cmake-format-badge modern" id="formatBadge">Modern</span>
+      <span class="dirty-dot" id="dirtyDot" title="Unsaved changes"></span>
+    </h2>
+    <p class="subtitle" id="cmakePathLabel">{{CMAKE_PATH}}</p>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <span class="format-toggle" id="formatToggle" style="display:none">
+      Format: <select id="formatSelect" onchange="switchCmakeFormat(this.value)">
+        <option value="legacy">Legacy (set/register)</option>
+        <option value="modern">Modern (idf_component_register)</option>
+      </select>
+    </span>
+    <button class="primary" id="saveBtn" onclick="save()">&#128190; Save</button>
+  </div>
+</div>
+
+<!-- ── Busy Banner ────────────────────────────────────────────── -->
+<div class="busy-banner" id="busyBanner">
+  <span class="spinner">&#9881;</span>
+  <span id="busyTaskLabel">Build is running...</span>
+  <span style="opacity:0.7">— saving is disabled</span>
+</div>
+
+<!-- ── Main Content ────────────────────────────────────────────── -->
+<div class="content" id="mainContent">
+  <!-- Dynamically rendered by JS based on IS_ROOT -->
+</div>
+
+<!-- ── Component Picker Overlay ────────────────────────────────── -->
+<div class="comp-picker-overlay" id="compPickerOverlay">
+  <div class="comp-picker-dialog">
+    <div class="comp-picker-header" id="compPickerTitle">Pick Components</div>
+    <div class="comp-picker-search">
+      <input type="text" id="compPickerSearch" placeholder="Filter components..." oninput="filterComponents()">
+    </div>
+    <div class="comp-picker-list" id="compPickerList"></div>
+    <div class="comp-picker-footer">
+      <button onclick="closeCompPicker()">Cancel</button>
+      <button class="primary" onclick="confirmCompPicker()">Add Selected</button>
+    </div>
+  </div>
+</div>
+
+<!-- Error catcher: runs before main script to catch SyntaxErrors -->
+<script>
+  window.addEventListener('error', function(ev) {
+    var el = document.getElementById('mainContent');
+    if (el) {
+      el.innerHTML = '<div style="padding:20px;color:#f44747;background:rgba(244,71,71,0.05);border:1px solid rgba(244,71,71,0.3);border-radius:6px;margin:8px">' +
+        '<h3 style="margin:0 0 8px">CMake Editor Error</h3>' +
+        '<p style="margin:0;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap">' + (ev.message || 'Unknown error') + '</p>' +
+        '<p style="margin:8px 0 0;color:rgba(255,255,255,0.5);font-size:11px">Try closing and reopening the editor. If the problem persists, edit CMakeLists.txt manually.</p></div>';
+    }
+  });
+</script>
+
+<script>
+// ── Globals ───────────────────────────────────────────────────
+const vscode = acquireVsCodeApi();
+const IS_ROOT = {{IS_ROOT}};
+const COMPONENT_NAME = "{{COMPONENT_NAME}}";
+const PROJECT_ROOT = "{{PROJECT_ROOT}}";
+const COMPONENT_DIR = "{{COMPONENT_DIR}}";
+const AVAILABLE_COMPONENTS = {{AVAILABLE_COMPONENTS}};
+let cmakeFormat = {{CMAKE_FORMAT}};
+
+let formData;
+let isDirty = false;
+let isBusy = false;
+let busyTask = '';
+let compPickerTarget = null;  // 'requires' | 'priv_requires' | 'exclude'
+
+// ── Initialize ────────────────────────────────────────────────
+function init() {
+  try {
+    formData = {{INITIAL_DATA}};
+  } catch (e) {
+    console.error('[CMakeEditor] Failed to parse INITIAL_DATA:', e);
+    formData = IS_ROOT ? getDefaultRootData() : getDefaultComponentData();
+  }
+  // Safety: ensure formData is a valid object
+  if (!formData || typeof formData !== 'object') {
+    console.error('[CMakeEditor] formData is invalid, using defaults');
+    formData = IS_ROOT ? getDefaultRootData() : getDefaultComponentData();
+  }
+  // Safety: ensure all expected fields exist (prevents undefined errors)
+  const defaults = IS_ROOT ? getDefaultRootData() : getDefaultComponentData();
+  for (const key of Object.keys(defaults)) {
+    if (formData[key] === undefined) {
+      formData[key] = defaults[key];
+    }
+  }
+  // Read cmakeFormat from parsed data
+  if (formData.cmakeFormat) {
+    cmakeFormat = formData.cmakeFormat;
+  }
+  formData.cmakeFormat = cmakeFormat;
+  if (IS_ROOT) {
+    document.getElementById('componentLabel').textContent = '— Root CMakeLists.txt';
+  }
+  // Show format toggle for non-root editors
+  if (!IS_ROOT) {
+    const formatToggle = document.getElementById('formatToggle');
+    if (formatToggle) formatToggle.style.display = '';
+    const formatSelect = document.getElementById('formatSelect');
+    if (formatSelect) formatSelect.value = cmakeFormat;
+  }
+  updateFormatBadge();
+  renderForm();
+  updatePreview();
+  console.log('[CMakeEditor] Init complete, IS_ROOT=' + IS_ROOT + ', format=' + cmakeFormat);
+}
+
+function getDefaultComponentData() {
+  return {
+    sourceMode: 'srcs',
+    srcs: [],
+    srcDirs: [],
+    excludeSrcs: [],
+    scannedFiles: [],
+    includeDirs: [],
+    privIncludeDirs: [],
+    requires: [],
+    privRequires: [],
+    embedFiles: [],
+    embedTxtFiles: [],
+    ldfragments: [],
+    cmakeFormat: cmakeFormat,
+    preambleBlock: '',
+    hasVariableRefs: false
+  };
+}
+
+function getDefaultRootData() {
+  return {
+    projectName: '',
+    excludeComponents: [],
+    extraComponentDirs: [],
+    postambleBlock: '',
+    partitionBinLinksBlock: ''
+  };
+}
+
+// ── Dirty State ───────────────────────────────────────────────
+function setDirty(val) {
+  isDirty = val !== undefined ? val : true;
+  const dot = document.getElementById('dirtyDot');
+  if (dot) dot.classList.toggle('visible', isDirty);
+  vscode.postMessage({ command: 'setDirty', dirty: isDirty });
+}
+
+// ── Render Form ───────────────────────────────────────────────
+function renderForm() {
+  const container = document.getElementById('mainContent');
+  if (IS_ROOT) {
+    container.innerHTML = renderRootForm();
+  } else {
+    container.innerHTML = renderComponentForm();
+  }
+  bindEvents();
+  restoreSections();
+  // Collapse preamble section by default
+  const preambleSection = document.getElementById('section_preamble');
+  if (preambleSection && !collapsedSections.has('preamble')) {
+    preambleSection.classList.add('collapsed');
+    collapsedSections.add('preamble');
+  }
+  // Collapse postamble section by default (only for root)
+  const postambleSection = document.getElementById('section_postamble');
+  if (postambleSection && !collapsedSections.has('postamble')) {
+    postambleSection.classList.add('collapsed');
+    collapsedSections.add('postamble');
+  }
+}
+
+function renderRootForm() {
+  return `
+    <div class="form-row" style="margin-bottom:16px">
+      <label class="form-label">Project name</label>
+      <div class="form-field">
+        <input type="text" class="project-name-input" id="projectName"
+               value="${esc(formData.projectName || '')}"
+               placeholder="my_esp_project"
+               oninput="formData.projectName=this.value;setDirty();updatePreview()">
+      </div>
+    </div>
+
+    ${section('exclude', '&#x1F6AB;', 'Excluded Components', `
+      <div class="sub-label">Components excluded from build:</div>
+      <div class="tag-list" id="excludeComponents_tags"></div>
+      <div class="inline-add">
+        <button class="tag-add-btn" onclick="pickComponents('exclude')">&#10133; Pick</button>
+      </div>
+    `)}
+
+    ${section('extraDirs', '&#x1F4C2;', 'Extra Component Directories', `
+      <div class="sub-label">Additional directories to search for components:</div>
+      <div class="tag-list" id="extraComponentDirs_tags"></div>
+      <div class="inline-add">
+        <input type="text" id="extraComponentDirs_input" placeholder="directory path" onkeydown="if(event.key==='Enter')addFromInput('extraComponentDirs','extraComponentDirs_input')">
+        <button class="tag-add-btn" onclick="pickFolder('extraComponentDirs')">&#128193; Add folder</button>
+        <button class="tag-add-btn" onclick="addFromInput('extraComponentDirs','extraComponentDirs_input')">&#10133; Add</button>
+      </div>
+    `)}
+
+    ${section('postamble', '&#x1F4DD;', 'Custom CMake Code (after project)' + (formData.postambleBlock && formData.postambleBlock.trim() ? '' : ' <span style="font-weight:400;color:var(--fg2);font-size:11px">(empty)</span>'), `
+      <div class="sub-label">CMake code after project() — partition links, custom commands, etc.:</div>
+      <textarea class="preamble-editor" id="postambleEditor"
+                placeholder="# e.g.&#10;# ESP8266 Tools: partition bin links -- BEGIN&#10;if(CONFIG_PARTITION_TABLE_CUSTOM)&#10;    esptool_py_flash_project_args(storage 0xB0000 &quot;data.bin&quot; FLASH_IN_PROJECT)&#10;endif()&#10;# ESP8266 Tools: partition bin links -- END"
+                oninput="updatePostamble(this.value)">${esc(formData.postambleBlock || '')}</textarea>
+    `)}
+
+    ${section('preview', '&#x1F4C4;', 'CMake Preview', `
+      <div class="cmake-preview" id="cmakePreview"></div>
+    `)}
+  `;
+}
+
+function renderComponentForm() {
+  return `
+    ${section('sources', '&#x1F4C1;', 'Sources', `
+      <div class="radio-group">
+        <label>
+          <input type="radio" name="sourceMode" value="srcs"
+                 ${formData.sourceMode === 'srcs' ? 'checked' : ''}
+                 onchange="setSourceMode('srcs')">
+          SRCS (manual list)
+        </label>
+        <label>
+          <input type="radio" name="sourceMode" value="srcDirs"
+                 ${formData.sourceMode === 'srcDirs' ? 'checked' : ''}
+                 onchange="setSourceMode('srcDirs')">
+          SRC_DIRS (auto-discover)
+        </label>
+      </div>
+
+      <div id="srcsMode" style="display:${formData.sourceMode === 'srcs' ? 'block' : 'none'}">
+        <div class="sub-label">Source files:</div>
+        <div class="tag-list" id="srcs_tags"></div>
+        <div class="inline-add">
+          <button class="tag-add-btn" onclick="pickFiles('srcs','c')">&#10133; Add files</button>
+        </div>
+      </div>
+
+      <div id="srcDirsMode" style="display:${formData.sourceMode === 'srcDirs' ? 'block' : 'none'}">
+        <div class="sub-label">SRC_DIRS:</div>
+        <div class="tag-list" id="srcDirs_tags"></div>
+        <div class="inline-add">
+          <input type="text" id="srcDirs_input" placeholder="src" onkeydown="if(event.key==='Enter')addFromInput('srcDirs','srcDirs_input')">
+          <button class="tag-add-btn" onclick="pickFolder('srcDirs')">&#128193;</button>
+          <button class="tag-add-btn" onclick="addFromInput('srcDirs','srcDirs_input')">&#10133;</button>
+        </div>
+
+        <div class="sub-label" style="margin-top:12px">EXCLUDE_SRCS:</div>
+        <div class="tag-list" id="excludeSrcs_tags"></div>
+        <div class="inline-add">
+          <input type="text" id="excludeSrcs_input" placeholder="file.c" onkeydown="if(event.key==='Enter')addFromInput('excludeSrcs','excludeSrcs_input')">
+          <button class="tag-add-btn" onclick="pickFiles('excludeSrcs','c')">&#10133;</button>
+          <button class="tag-add-btn" onclick="addFromInput('excludeSrcs','excludeSrcs_input')">&#10133; Add</button>
+        </div>
+
+        <div class="discovered-info" id="discoveredInfo" style="display:${formData.scannedFiles && formData.scannedFiles.length ? 'block' : 'none'}">
+          Discovered files: <span id="discoveredFiles"></span> (<span class="count" id="discoveredCount">0</span> files)
+        </div>
+      </div>
+    `)}
+
+    ${section('includes', '&#x1F4C2;', 'Include Directories', `
+      <div class="sub-label">INCLUDE_DIRS (public):</div>
+      <div class="tag-list" id="includeDirs_tags"></div>
+      <div class="inline-add">
+        <input type="text" id="includeDirs_input" placeholder="." onkeydown="if(event.key==='Enter')addFromInput('includeDirs','includeDirs_input')">
+        <button class="tag-add-btn" onclick="pickFolder('includeDirs')">&#128193;</button>
+        <button class="tag-add-btn" onclick="addFromInput('includeDirs','includeDirs_input')">&#10133; Add</button>
+      </div>
+
+      <div class="sub-label">PRIV_INCLUDE_DIRS (private):</div>
+      <div class="tag-list" id="privIncludeDirs_tags"></div>
+      <div class="inline-add">
+        <input type="text" id="privIncludeDirs_input" placeholder="private" onkeydown="if(event.key==='Enter')addFromInput('privIncludeDirs','privIncludeDirs_input')">
+        <button class="tag-add-btn" onclick="pickFolder('privIncludeDirs')">&#128193;</button>
+        <button class="tag-add-btn" onclick="addFromInput('privIncludeDirs','privIncludeDirs_input')">&#10133; Add</button>
+      </div>
+    `)}
+
+    ${section('preamble', '&#x1F4DD;', 'Custom CMake Code (preamble)' + (formData.preambleBlock && formData.preambleBlock.trim() ? '' : ' <span style="font-weight:400;color:var(--fg2);font-size:11px">(empty)</span>'), `
+      <div class="sub-label">CMake code executed before idf_component_register():</div>
+      <textarea class="preamble-editor" id="preambleEditor"
+                placeholder="# e.g.&#10;if(CONFIG_BT_ENABLED)&#10;    set(COMPONENT_REQUIRES bt)&#10;else()&#10;    set(COMPONENT_REQUIRES)&#10;endif()"
+                oninput="updatePreamble(this.value)">${esc(formData.preambleBlock || '')}</textarea>
+      <div class="var-ref-warning" id="varRefWarning" style="display:${formData.hasVariableRefs ? 'flex' : 'none'}">
+        <span class="warn-icon">&#x26A0;&#xFE0F;</span>
+        <span>Variable references ($&#123;...&#125;) in REQUIRES/PRIV_REQUIRES can't be resolved by the editor. Edit the preamble above to change their values.</span>
+      </div>
+    `)}
+
+    ${section('deps', '&#x1F517;', 'Component Dependencies', `
+      <div class="sub-label">REQUIRES (public &mdash; visible to dependent components):</div>
+      <div class="tag-list" id="requires_tags"></div>
+      <div class="inline-add">
+        <input type="text" id="requires_input" placeholder="component or \${VARIABLE}" onkeydown="if(event.key==='Enter')addFromInput('requires','requires_input')">
+        <button class="tag-add-btn" onclick="addFromInput('requires','requires_input')">&#10133; Add</button>
+        <button class="tag-add-btn" onclick="pickComponents('requires')">&#128269; Pick</button>
+      </div>
+      <div class="sub-label" style="margin-top:2px;font-size:10px;text-transform:none;letter-spacing:0;color:var(--fg2);font-weight:400">Tip: type <code style="font-family:var(--vscode-editor-font-family,'Consolas',monospace);background:var(--tag-bg);padding:1px 4px;border-radius:3px">\${COMPONENT_REQUIRES}</code> to reference a variable set in the preamble</div>
+
+      <div class="sub-label">PRIV_REQUIRES (private &mdash; internal use only):</div>
+      <div class="tag-list" id="privRequires_tags"></div>
+      <div class="inline-add">
+        <input type="text" id="priv_requires_input" placeholder="component or \${VARIABLE}" onkeydown="if(event.key==='Enter')addFromInput('privRequires','priv_requires_input')">
+        <button class="tag-add-btn" onclick="addFromInput('privRequires','priv_requires_input')">&#10133; Add</button>
+        <button class="tag-add-btn" onclick="pickComponents('priv_requires')">&#128269; Pick</button>
+      </div>
+      <div class="sub-label" style="margin-top:2px;font-size:10px;text-transform:none;letter-spacing:0;color:var(--fg2);font-weight:400">Tip: type <code style="font-family:var(--vscode-editor-font-family,'Consolas',monospace);background:var(--tag-bg);padding:1px 4px;border-radius:3px">\${COMPONENT_REQUIRES}</code> to reference a variable set in the preamble</div>
+    `)}
+
+    ${section('embed', '&#x1F4CE;', 'Embedded Files', `
+      <div class="sub-label">EMBED_TXTFILES (text, null-terminated string):</div>
+      <div class="tag-list" id="embedTxtFiles_tags"></div>
+      <div class="inline-add">
+        <button class="tag-add-btn" onclick="pickFiles('embedTxtFiles','txt')">&#10133; Pick files</button>
+      </div>
+
+      <div class="sub-label">EMBED_FILES (binary, raw bytes):</div>
+      <div class="tag-list" id="embedFiles_tags"></div>
+      <div class="inline-add">
+        <button class="tag-add-btn" onclick="pickFiles('embedFiles','any')">&#10133; Pick files</button>
+      </div>
+    `)}
+
+    ${section('linker', '&#x1F527;', 'Linker Scripts', `
+      <div class="sub-label">LDFRAGMENTS:</div>
+      <div class="tag-list" id="ldfragments_tags"></div>
+      <div class="inline-add">
+        <button class="tag-add-btn" onclick="pickFiles('ldfragments','lf')">&#10133; Pick files</button>
+      </div>
+    `)}
+
+    ${section('preview', '&#x1F4C4;', 'CMake Preview', `
+      <div class="cmake-preview" id="cmakePreview"></div>
+    `)}
+  `;
+}
+
+// ── Section Helper ────────────────────────────────────────────
+function section(id, icon, title, bodyHtml) {
+  return `
+    <div class="section" id="section_${id}" data-section="${id}">
+      <div class="section-header" onclick="toggleSection('${id}')">
+        <span class="chevron">&#9660;</span>
+        <span class="section-icon">${icon}</span>
+        <span class="section-title">${title}</span>
+      </div>
+      <div class="section-body">${bodyHtml}</div>
+    </div>
+  `;
+}
+
+// ── Section Collapse ──────────────────────────────────────────
+const collapsedSections = new Set();
+
+function toggleSection(id) {
+  const el = document.getElementById('section_' + id);
+  if (!el) return;
+  el.classList.toggle('collapsed');
+  if (el.classList.contains('collapsed')) {
+    collapsedSections.add(id);
+  } else {
+    collapsedSections.delete(id);
+  }
+}
+
+function restoreSections() {
+  collapsedSections.forEach(id => {
+    const el = document.getElementById('section_' + id);
+    if (el) el.classList.add('collapsed');
+  });
+}
+
+// ── Tag Rendering ─────────────────────────────────────────────
+function renderTags(field) {
+  const container = document.getElementById(field + '_tags');
+  if (!container) return;
+  const values = formData[field] || [];
+  container.innerHTML = values.map((v, i) => {
+    const isVar = /\$\{[^}]+\}/.test(v);
+    if (isVar) {
+      return `<span class="tag var-ref" title="Variable reference — edit in Custom CMake preamble">
+         <span class="tag-icon">&#x1F517;</span>
+         <span class="tag-text">${esc(v)}</span>
+         <button class="tag-remove" onclick="removeTag('${field}',${i})" title="Remove">&#10005;</button>
+       </span>`;
+    }
+    return `<span class="tag">
+       <span class="tag-text">${esc(v)}</span>
+       <button class="tag-remove" onclick="removeTag('${field}',${i})" title="Remove">&#10005;</button>
+     </span>`;
+  }).join('');
+  
+  // Show/hide variable reference warning
+  updateVarRefWarning();
+}
+
+function removeTag(field, index) {
+  formData[field].splice(index, 1);
+  setDirty();
+  renderTags(field);
+  updatePreview();
+  if (field === 'srcDirs') {
+    requestScan();
+  }
+}
+
+function addTag(field, value) {
+  value = (value || '').trim();
+  if (!value) return;
+  if (!formData[field]) formData[field] = [];
+  if (formData[field].includes(value)) return;
+  formData[field].push(value);
+  setDirty();
+  renderTags(field);
+  updatePreview();
+  if (field === 'srcDirs') {
+    requestScan();
+  }
+}
+
+function addFromInput(field, inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  addTag(field, input.value);
+  input.value = '';
+}
+
+// ── Preamble Editor ──────────────────────────────────────────
+function updatePreamble(value) {
+  formData.preambleBlock = value;
+  setDirty();
+  updatePreview();
+  
+  // Update section header to show (empty) or not
+  const section = document.getElementById('section_preamble');
+  if (section) {
+    const titleEl = section.querySelector('.section-title');
+    if (titleEl) {
+      const baseTitle = 'Custom CMake Code (preamble)';
+      titleEl.innerHTML = value.trim() ? baseTitle : baseTitle + ' <span style="font-weight:400;color:var(--fg2);font-size:11px">(empty)</span>';
+    }
+  }
+}
+
+// ── Postamble Editor (root CMakeLists.txt) ──────────────────
+function updatePostamble(value) {
+  formData.postambleBlock = value;
+  setDirty();
+  updatePreview();
+  
+  // Update section header to show (empty) or not
+  const section = document.getElementById('section_postamble');
+  if (section) {
+    const titleEl = section.querySelector('.section-title');
+    if (titleEl) {
+      const baseTitle = 'Custom CMake Code (after project)';
+      titleEl.innerHTML = value.trim() ? baseTitle : baseTitle + ' <span style="font-weight:400;color:var(--fg2);font-size:11px">(empty)</span>';
+    }
+  }
+}
+
+// ── Variable Ref Warning ──────────────────────────────────────
+function updateVarRefWarning() {
+  const warning = document.getElementById('varRefWarning');
+  if (!warning) return;
+  
+  const hasVarRefs = (formData.requires || []).some(v => /\$\{[^}]+\}/.test(v)) ||
+                     (formData.privRequires || []).some(v => /\$\{[^}]+\}/.test(v));
+  warning.style.display = hasVarRefs ? 'flex' : 'none';
+}
+
+// ── CMake syntax highlight for preamble ───────────────────────
+function highlightCmake(code) {
+  return code.split('\n').map(line => {
+    // Highlight keywords
+    let highlighted = esc(line)
+      .replace(/\b(if|else|elseif|endif|set|unset|message|include|option)\b/g, '<span class="kw">$1</span>')
+      .replace(/\$\{([^}]+)\}/g, '<span class="var">${$1}</span>')
+      .replace(/(CONFIG_\w+)/g, '<span class="var">$1</span>')
+      .replace(/(#.*$)/, '<span class="cmt">$1</span>');
+    return highlighted;
+  }).join('\n');
+}
+
+// ── Source Mode Toggle ────────────────────────────────────────
+function setSourceMode(mode) {
+  formData.sourceMode = mode;
+  setDirty();
+  const srcsDiv = document.getElementById('srcsMode');
+  const srcDirsDiv = document.getElementById('srcDirsMode');
+  if (srcsDiv) srcsDiv.style.display = mode === 'srcs' ? 'block' : 'none';
+  if (srcDirsDiv) srcDirsDiv.style.display = mode === 'srcDirs' ? 'block' : 'none';
+  updatePreview();
+}
+
+// ── Bind Events / Render Tags ─────────────────────────────────
+function bindEvents() {
+  if (IS_ROOT) {
+    renderTags('excludeComponents');
+    renderTags('extraComponentDirs');
+  } else {
+    renderTags('srcs');
+    renderTags('srcDirs');
+    renderTags('excludeSrcs');
+    renderTags('includeDirs');
+    renderTags('privIncludeDirs');
+    renderTags('requires');
+    renderTags('privRequires');
+    renderTags('embedFiles');
+    renderTags('embedTxtFiles');
+    renderTags('ldfragments');
+    updateDiscoveredInfo();
+    // Initialize var-ref warning
+    updateVarRefWarning();
+  }
+}
+
+function updateDiscoveredInfo() {
+  const infoEl = document.getElementById('discoveredInfo');
+  const filesEl = document.getElementById('discoveredFiles');
+  const countEl = document.getElementById('discoveredCount');
+  if (!infoEl || !formData.scannedFiles) return;
+  if (formData.scannedFiles.length > 0) {
+    infoEl.style.display = 'block';
+    filesEl.textContent = formData.scannedFiles.join(', ');
+    countEl.textContent = formData.scannedFiles.length;
+  } else {
+    infoEl.style.display = 'none';
+  }
+}
+
+// ── Pick Files / Folders ──────────────────────────────────────
+function pickFiles(target, filter) {
+  vscode.postMessage({ command: 'pickFiles', target, filter, multi: true });
+}
+
+function pickFolder(target) {
+  vscode.postMessage({ command: 'pickFolder', target });
+}
+
+// ── Component Picker ──────────────────────────────────────────
+function pickComponents(type) {
+  compPickerTarget = type;
+  const overlay = document.getElementById('compPickerOverlay');
+  const search = document.getElementById('compPickerSearch');
+  const title = document.getElementById('compPickerTitle');
+
+  if (type === 'requires') title.textContent = 'Pick REQUIRES Components';
+  else if (type === 'priv_requires') title.textContent = 'Pick PRIV_REQUIRES Components';
+  else if (type === 'exclude') title.textContent = 'Pick Excluded Components';
+
+  const currentField = type === 'requires' ? 'requires'
+    : type === 'priv_requires' ? 'privRequires'
+    : 'excludeComponents';
+  const currentValues = new Set(formData[currentField] || []);
+
+  renderCompPickerList(AVAILABLE_COMPONENTS, currentValues);
+  search.value = '';
+  overlay.classList.add('open');
+  setTimeout(() => search.focus(), 100);
+}
+
+function renderCompPickerList(components, selectedSet) {
+  const list = document.getElementById('compPickerList');
+  list.innerHTML = components.map(c =>
+    `<div class="comp-picker-item${selectedSet.has(c) ? ' selected' : ''}" data-component="${esc(c)}">
+       <input type="checkbox" ${selectedSet.has(c) ? 'checked' : ''}>
+       <span>${esc(c)}</span>
+     </div>`
+  ).join('');
+
+  list.querySelectorAll('.comp-picker-item').forEach(item => {
+    item.addEventListener('click', () => {
+      const cb = item.querySelector('input');
+      cb.checked = !cb.checked;
+      item.classList.toggle('selected', cb.checked);
+    });
+  });
+}
+
+function filterComponents() {
+  const query = document.getElementById('compPickerSearch').value.toLowerCase();
+  const list = document.getElementById('compPickerList');
+  if (!list) return;
+  list.querySelectorAll('.comp-picker-item').forEach(item => {
+    const name = item.dataset.component || '';
+    item.style.display = name.toLowerCase().includes(query) ? '' : 'none';
+  });
+}
+
+function closeCompPicker() {
+  document.getElementById('compPickerOverlay').classList.remove('open');
+  compPickerTarget = null;
+}
+
+function confirmCompPicker() {
+  const list = document.getElementById('compPickerList');
+  const selected = [];
+  list.querySelectorAll('.comp-picker-item input:checked').forEach(cb => {
+    selected.push(cb.parentElement.dataset.component);
+  });
+
+  if (!compPickerTarget) { closeCompPicker(); return; }
+
+  const field = compPickerTarget === 'requires' ? 'requires'
+    : compPickerTarget === 'priv_requires' ? 'privRequires'
+    : 'excludeComponents';
+
+  selected.forEach(c => {
+    if (!formData[field].includes(c)) {
+      formData[field].push(c);
+    }
+  });
+
+  setDirty();
+  renderTags(field);
+  updatePreview();
+  closeCompPicker();
+}
+
+// ── Scan Directory ────────────────────────────────────────────
+function requestScan() {
+  if (formData.srcDirs && formData.srcDirs.length > 0) {
+    vscode.postMessage({ command: 'scanDirectory', dirs: formData.srcDirs });
+  } else {
+    formData.scannedFiles = [];
+    updateDiscoveredInfo();
+  }
+}
+
+// ── CMake Preview ─────────────────────────────────────────────
+function updatePreview() {
+  const preview = document.getElementById('cmakePreview');
+  if (!preview) return;
+
+  if (IS_ROOT) {
+    preview.innerHTML = generateRootPreviewHtml();
+  } else {
+    preview.innerHTML = generateComponentPreviewHtml();
+  }
+}
+
+function generateRootPreviewHtml() {
+  const parts = [];
+  parts.push(`<span class="kw">cmake_minimum_required</span>(<span class="str">VERSION 3.5</span>)`);
+  parts.push(`<span class="kw">include</span>(<span class="var">$ENV{IDF_PATH}</span>/tools/cmake/project.cmake)`);
+
+  if (formData.excludeComponents && formData.excludeComponents.length > 0) {
+    const args = formData.excludeComponents.map(c => `<span class="str">${esc(c)}</span>`).join(' ');
+    parts.push(`<span class="kw">set</span>(EXCLUDE_COMPONENTS ${args})`);
+  }
+
+  if (formData.extraComponentDirs && formData.extraComponentDirs.length > 0) {
+    const args = formData.extraComponentDirs.map(d => `<span class="str">${esc(d)}</span>`).join(' ');
+    parts.push(`<span class="kw">set</span>(EXTRA_COMPONENT_DIRS ${args})`);
+  }
+
+  const projName = formData.projectName || 'my_project';
+  parts.push(`<span class="kw">project</span>(<span class="str">${esc(projName)}</span>)`);
+
+  // Append postamble content (after project())
+  if (formData.postambleBlock && formData.postambleBlock.trim()) {
+    parts.push(highlightCmake(formData.postambleBlock.trim()));
+  }
+
+  return parts.join('\n');
+}
+
+function generateComponentPreviewHtml() {
+  const fmt = formData.cmakeFormat || cmakeFormat || 'modern';
+
+  if (fmt === 'legacy') {
+    return generateLegacyPreviewHtml();
+  }
+
+  // Modern format preview
+  const args = [];
+
+  if (formData.sourceMode === 'srcDirs') {
+    if (formData.srcDirs && formData.srcDirs.length > 0) {
+      const dirs = formData.srcDirs.map(d => `<span class="str">"${esc(d)}"</span>`).join(' ');
+      args.push(`    SRC_DIRS ${dirs}`);
+    }
+    if (formData.excludeSrcs && formData.excludeSrcs.length > 0) {
+      const exc = formData.excludeSrcs.map(f => `<span class="str">"${esc(f)}"</span>`).join(' ');
+      args.push(`    EXCLUDE_SRCS ${exc}`);
+    }
+  } else {
+    if (formData.srcs && formData.srcs.length > 0) {
+      const srcs = formData.srcs.map(s => `<span class="str">"${esc(s)}"</span>`).join(' ');
+      args.push(`    SRCS ${srcs}`);
+    }
+  }
+
+  if (formData.includeDirs && formData.includeDirs.length > 0) {
+    const dirs = formData.includeDirs.map(d => `<span class="str">"${esc(d)}"</span>`).join(' ');
+    args.push(`    INCLUDE_DIRS ${dirs}`);
+  }
+
+  if (formData.privIncludeDirs && formData.privIncludeDirs.length > 0) {
+    const dirs = formData.privIncludeDirs.map(d => `<span class="str">"${esc(d)}"</span>`).join(' ');
+    args.push(`    PRIV_INCLUDE_DIRS ${dirs}`);
+  }
+
+  if (formData.requires && formData.requires.length > 0) {
+    const comps = formData.requires.map(c => {
+      if (/\$\{[^}]+\}/.test(c)) return `<span class="var">${esc(c)}</span>`;
+      return `<span class="str">${esc(c)}</span>`;
+    }).join(' ');
+    args.push(`    REQUIRES ${comps}`);
+  }
+
+  if (formData.privRequires && formData.privRequires.length > 0) {
+    const comps = formData.privRequires.map(c => {
+      if (/\$\{[^}]+\}/.test(c)) return `<span class="var">${esc(c)}</span>`;
+      return `<span class="str">${esc(c)}</span>`;
+    }).join(' ');
+    args.push(`    PRIV_REQUIRES ${comps}`);
+  }
+
+  if (formData.embedTxtFiles && formData.embedTxtFiles.length > 0) {
+    const files = formData.embedTxtFiles.map(f => `<span class="str">"${esc(f)}"</span>`).join(' ');
+    args.push(`    EMBED_TXTFILES ${files}`);
+  }
+
+  if (formData.embedFiles && formData.embedFiles.length > 0) {
+    const files = formData.embedFiles.map(f => `<span class="str">"${esc(f)}"</span>`).join(' ');
+    args.push(`    EMBED_FILES ${files}`);
+  }
+
+  if (formData.ldfragments && formData.ldfragments.length > 0) {
+    const frags = formData.ldfragments.map(f => `<span class="str">"${esc(f)}"</span>`).join(' ');
+    args.push(`    LDFRAGMENTS ${frags}`);
+  }
+
+  let preambleHtml = '';
+  if (formData.preambleBlock && formData.preambleBlock.trim()) {
+    preambleHtml = highlightCmake(formData.preambleBlock.trimEnd()) + '\n\n';
+  }
+  
+  if (args.length === 0) {
+    return preambleHtml + `<span class="fn">idf_component_register</span>()`;
+  }
+
+  return preambleHtml + `<span class="fn">idf_component_register</span>(\n${args.join('\n')}\n)`;
+}
+
+/**
+ * Generate legacy format preview (set/register_component style)
+ */
+function generateLegacyPreviewHtml() {
+  const lines = [];
+  // Show preamble in preview
+  if (formData.preambleBlock && formData.preambleBlock.trim()) {
+    lines.push(highlightCmake(formData.preambleBlock.trimEnd()));
+    lines.push('');  // blank line separator
+  }
+  const mode = formData.sourceMode || 'srcs';
+
+  if (mode === 'srcs' && formData.srcs && formData.srcs.length > 0) {
+    const srcs = formData.srcs.map(s => `<span class="str">"${esc(s)}"</span>`).join(' ');
+    lines.push(`<span class="kw">set</span>(<span class="var">COMPONENT_SRCS</span> ${srcs})`);
+  }
+
+  if (mode === 'srcDirs' && formData.srcDirs && formData.srcDirs.length > 0) {
+    const dirs = formData.srcDirs.map(d => `<span class="str">"${esc(d)}"</span>`).join(' ');
+    lines.push(`<span class="kw">set</span>(<span class="var">COMPONENT_SRCDIRS</span> ${dirs})`);
+  }
+
+  if (mode === 'srcDirs' && formData.excludeSrcs && formData.excludeSrcs.length > 0) {
+    const exc = formData.excludeSrcs.map(f => `<span class="str">"${esc(f)}"</span>`).join(' ');
+    lines.push(`<span class="kw">set</span>(<span class="var">COMPONENT_SRCEXCLUDE</span> ${exc})`);
+  }
+
+  if (formData.includeDirs && formData.includeDirs.length > 0) {
+    const dirs = formData.includeDirs.map(d => `<span class="str">"${esc(d)}"</span>`).join(' ');
+    lines.push(`<span class="kw">set</span>(<span class="var">COMPONENT_ADD_INCLUDEDIRS</span> ${dirs})`);
+  }
+
+  if (formData.privIncludeDirs && formData.privIncludeDirs.length > 0) {
+    const dirs = formData.privIncludeDirs.map(d => `<span class="str">"${esc(d)}"</span>`).join(' ');
+    lines.push(`<span class="kw">set</span>(<span class="var">COMPONENT_PRIV_INCLUDEDIRS</span> ${dirs})`);
+  }
+
+  if (formData.requires && formData.requires.length > 0) {
+    const comps = formData.requires.map(c => {
+      if (/\$\{[^}]+\}/.test(c)) return `<span class="var">${esc(c)}</span>`;
+      return `<span class="str">${esc(c)}</span>`;
+    }).join(' ');
+    lines.push(`<span class="kw">set</span>(<span class="var">COMPONENT_REQUIRES</span> ${comps})`);
+  }
+
+  if (formData.privRequires && formData.privRequires.length > 0) {
+    const comps = formData.privRequires.map(c => {
+      if (/\$\{[^}]+\}/.test(c)) return `<span class="var">${esc(c)}</span>`;
+      return `<span class="str">${esc(c)}</span>`;
+    }).join(' ');
+    lines.push(`<span class="kw">set</span>(<span class="var">COMPONENT_PRIV_REQUIRES</span> ${comps})`);
+  }
+
+  if (formData.ldfragments && formData.ldfragments.length > 0) {
+    const frags = formData.ldfragments.map(f => `<span class="str">"${esc(f)}"</span>`).join(' ');
+    lines.push(`<span class="kw">set</span>(<span class="var">COMPONENT_ADD_LDFRAGMENTS</span> ${frags})`);
+  }
+
+  if (formData.embedFiles && formData.embedFiles.length > 0) {
+    const files = formData.embedFiles.map(f => `<span class="str">"${esc(f)}"</span>`).join(' ');
+    lines.push(`<span class="kw">set</span>(<span class="var">COMPONENT_EMBED_FILES</span> ${files})`);
+  }
+
+  if (formData.embedTxtFiles && formData.embedTxtFiles.length > 0) {
+    const files = formData.embedTxtFiles.map(f => `<span class="str">"${esc(f)}"</span>`).join(' ');
+    lines.push(`<span class="kw">set</span>(<span class="var">COMPONENT_EMBED_TXTFILES</span> ${files})`);
+  }
+
+  return lines.join('\n') + '\n\n<span class="fn">register_component</span>()';
+}
+
+// ── Save ──────────────────────────────────────────────────────
+function save() {
+  if (isBusy) return;  // Prevent saving during build
+  vscode.postMessage({ command: 'setDirty', dirty: false });
+  isDirty = false;
+  const dot = document.getElementById('dirtyDot');
+  if (dot) dot.classList.remove('visible');
+
+  if (IS_ROOT) {
+    vscode.postMessage({
+      command: 'save',
+      data: {
+        isRoot: true,
+        projectName: formData.projectName || '',
+        excludeComponents: formData.excludeComponents || [],
+        extraComponentDirs: formData.extraComponentDirs || [],
+        postambleBlock: formData.postambleBlock || '',
+        partitionBinLinksBlock: formData.partitionBinLinksBlock || ''
+      }
+    });
+  } else {
+    vscode.postMessage({
+      command: 'save',
+      data: {
+        isRoot: false,
+        componentName: COMPONENT_NAME,
+        cmakeFormat: formData.cmakeFormat || cmakeFormat || 'modern',
+        sourceMode: formData.sourceMode || 'srcs',
+        srcs: formData.srcs || [],
+        srcDirs: formData.srcDirs || [],
+        excludeSrcs: formData.excludeSrcs || [],
+        includeDirs: formData.includeDirs || [],
+        privIncludeDirs: formData.privIncludeDirs || [],
+        requires: formData.requires || [],
+        privRequires: formData.privRequires || [],
+        embedFiles: formData.embedFiles || [],
+        embedTxtFiles: formData.embedTxtFiles || [],
+        ldfragments: formData.ldfragments || [],
+        preambleBlock: formData.preambleBlock || '',
+        hasVariableRefs: formData.hasVariableRefs || false
+      }
+    });
+  }
+}
+
+// ── CMake Format Toggle ────────────────────────────────────────
+function switchCmakeFormat(newFormat) {
+  cmakeFormat = newFormat;
+  formData.cmakeFormat = newFormat;
+  updateFormatBadge();
+  setDirty();
+  updatePreview();
+}
+
+function updateFormatBadge() {
+  const badge = document.getElementById('formatBadge');
+  if (!badge) return;
+  if (IS_ROOT) {
+    badge.style.display = 'none';
+    return;
+  }
+  badge.style.display = '';
+  badge.textContent = cmakeFormat === 'legacy' ? 'Legacy' : 'Modern';
+  badge.className = 'cmake-format-badge ' + cmakeFormat;
+}
+
+// ── Incoming Messages ─────────────────────────────────────────
+window.addEventListener('message', event => {
+  const msg = event.data;
+
+  if (msg.command === 'setPickedFiles') {
+    const files = msg.files || [];
+    files.forEach(f => addTag(msg.target, f));
+  }
+
+  if (msg.command === 'setPickedComponents') {
+    const components = msg.components || [];
+    const field = msg.type === 'requires' ? 'requires'
+      : msg.type === 'priv_requires' ? 'privRequires'
+      : 'excludeComponents';
+    components.forEach(c => addTag(field, c));
+  }
+
+  if (msg.command === 'setScannedFiles') {
+    formData.scannedFiles = msg.files || [];
+    updateDiscoveredInfo();
+  }
+
+  if (msg.command === 'refreshData') {
+    const data = msg.data || {};
+    // Update format if changed
+    if (data.cmakeFormat && data.cmakeFormat !== cmakeFormat) {
+      cmakeFormat = data.cmakeFormat;
+      formData.cmakeFormat = cmakeFormat;
+      const formatSelect = document.getElementById('formatSelect');
+      if (formatSelect) formatSelect.value = cmakeFormat;
+      updateFormatBadge();
+    }
+    // Update form data fields
+    Object.keys(data).forEach(key => {
+      if (key !== 'cmakeFormat') {
+        formData[key] = data[key];
+      }
+    });
+    renderForm();
+    updatePreview();
+    isDirty = false;
+    const dot = document.getElementById('dirtyDot');
+    if (dot) dot.classList.remove('visible');
+  }
+
+  if (msg.command === 'setDirty') {
+    isDirty = msg.dirty;
+    const dot = document.getElementById('dirtyDot');
+    if (dot) dot.classList.toggle('visible', isDirty);
+  }
+
+  if (msg.command === 'setBusy') {
+    isBusy = msg.busy;
+    busyTask = msg.task || '';
+    const btn = document.getElementById('saveBtn');
+    const banner = document.getElementById('busyBanner');
+    const taskLabel = document.getElementById('busyTaskLabel');
+    if (btn) btn.disabled = isBusy;
+    if (banner) banner.classList.toggle('visible', isBusy);
+    if (taskLabel) taskLabel.textContent = isBusy ? `"${busyTask}" is running...` : '';
+  }
+});
+
+// ── Escape HTML ───────────────────────────────────────────────
+function esc(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+// ── Boot ──────────────────────────────────────────────────────
+try {
+  init();
+} catch (e) {
+  console.error('[CMakeEditor] Init error:', e);
+  var _errEl = document.getElementById('mainContent');
+  if (_errEl) {
+    _errEl.innerHTML = 
+      '<div style="padding:20px;color:#f44747;background:rgba(244,71,71,0.05);border:1px solid rgba(244,71,71,0.3);border-radius:6px">' +
+      '<h3>CMake Editor Initialization Failed</h3>' +
+      '<p style="font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap">' + 
+      (e.message || String(e)) + '</p>' +
+      '<p style="color:rgba(255,255,255,0.5);font-size:11px;margin-top:8px">Try closing and reopening the editor. If the problem persists, edit CMakeLists.txt manually.</p></div>';
+  }
+}
+</script>
+
+</body>
+</html>

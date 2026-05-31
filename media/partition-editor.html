@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
+<title>ESP Partition Editor</title>
+<style>
+  :root {
+    --bg:      var(--vscode-editor-background);
+    --bg2:     var(--vscode-sideBar-background,         var(--vscode-editor-background));
+    --bg3:     var(--vscode-input-background,            #2d2d30);
+    --border:  var(--vscode-panel-border,               var(--vscode-editorGroup-border, #3e3e42));
+    --accent:  var(--vscode-button-background,          #007acc);
+    --accent2: var(--vscode-button-hoverBackground,     #0098ff);
+    --text:    var(--vscode-editor-foreground);
+    --text2:   var(--vscode-editorInfo-foreground,      var(--vscode-editor-foreground));
+    --error:   var(--vscode-editorError-foreground,     #f44747);
+    --warn:    var(--vscode-editorWarning-foreground,   #cca700);
+    --ok:      var(--vscode-terminal-ansiGreen,         #4ec9b0);
+    --input-fg:     var(--vscode-input-foreground,      var(--vscode-editor-foreground));
+    --input-bg:     var(--vscode-input-background);
+    --input-border: var(--vscode-input-border,          var(--vscode-panel-border));
+    --btn-fg:       var(--vscode-button-foreground,     #fff);
+    --btn-bg:       var(--vscode-button-background,     #007acc);
+    --btn-hover:    var(--vscode-button-hoverBackground,#0098ff);
+    --btn2-bg:      var(--vscode-button-secondaryBackground,   var(--vscode-editor-background));
+    --btn2-fg:      var(--vscode-button-secondaryForeground,   var(--vscode-editor-foreground));
+    --btn2-hover:   var(--vscode-button-secondaryHoverBackground, var(--vscode-input-background));
+    --table-header: var(--vscode-editorGroupHeader-tabsBackground, var(--vscode-sideBar-background));
+    --row-hover:    var(--vscode-list-hoverBackground);
+    --select-bg:    var(--vscode-dropdown-background,   var(--vscode-input-background));
+    --select-fg:    var(--vscode-dropdown-foreground,   var(--vscode-editor-foreground));
+    --select-border:var(--vscode-dropdown-border,       var(--vscode-input-border));
+    --free-seg:     var(--vscode-editorGutter-background, rgba(128,128,128,0.15));
+    --subtitle-fg:  var(--vscode-descriptionForeground, #888);
+    --badge-bg:     var(--vscode-badge-background,      #4d4d4d);
+    --badge-fg:     var(--vscode-badge-foreground,      #fff);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--vscode-font-family, 'Segoe UI', sans-serif); font-size: var(--vscode-font-size, 13px); padding: 16px; position: relative; }
+  h2 { color: var(--text2); margin-bottom: 4px; font-size: 16px; font-weight: 600; }
+  .subtitle { color: var(--subtitle-fg); margin-bottom: 16px; font-size: 12px; }
+  code { background: var(--badge-bg); color: var(--badge-fg); padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+
+  .flash-map-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; padding: 12px; margin-bottom: 16px; }
+  .flash-map-wrap h3 { color: var(--subtitle-fg); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+  #flashMap { display: flex; height: 36px; border-radius: 4px; overflow: hidden; width: 100%; border: 1px solid var(--border); }
+  #flashMap .seg { display: flex; align-items: center; justify-content: center; font-size: 10px;
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis; transition: flex 0.3s;
+    cursor: default; border-right: 1px solid rgba(0,0,0,0.15); }
+  #flashMap .seg:last-child { border-right: none; }
+  #flashMap .seg.free {
+    background-image: repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(128,128,128,0.15) 4px, rgba(128,128,128,0.15) 8px);
+    background-color: rgba(128,128,128,0.07); color: var(--subtitle-fg);
+  }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .legend-item { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--subtitle-fg); }
+  .legend-dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+
+  .toolbar { display: flex; gap: 8px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+  button { background: var(--btn2-bg); color: var(--btn2-fg); border: 1px solid var(--border); padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  button:hover { background: var(--btn2-hover); border-color: var(--border); }
+  button.primary { background: var(--btn-bg); border-color: var(--btn-bg); color: var(--btn-fg); }
+  button.primary:hover { background: var(--btn-hover); border-color: var(--btn-hover); }
+  button.danger:hover { background: var(--error); border-color: var(--error); color: #fff; }
+  .flash-size-sel { background: var(--select-bg); color: var(--select-fg); border: 1px solid var(--select-border); padding: 5px 8px; border-radius: 4px; font-size: 12px; }
+
+  .table-wrap { overflow-x: auto; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { background: var(--table-header); color: var(--subtitle-fg); font-weight: 500; padding: 6px 8px; text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 2px solid var(--border); white-space: nowrap; }
+  tr.part-row { border-bottom: 1px solid var(--border); }
+  tr.part-row:hover { background: var(--row-hover); }
+  tr.part-row.has-error td { background: rgba(244,71,71,0.06); }
+  td { padding: 4px 4px; vertical-align: middle; }
+  td input, td select { background: transparent; color: var(--input-fg); border: 1px solid transparent; padding: 4px 6px; border-radius: 3px; font-size: 12px; width: 100%; font-family: var(--vscode-editor-font-family, 'Consolas', monospace); }
+  td input:focus, td select:focus { outline: none; border-color: var(--accent); background: var(--input-bg); }
+  td select { background: var(--select-bg); color: var(--select-fg); cursor: pointer; }
+  td input.invalid { border-color: var(--error) !important; }
+  .drag-handle { color: var(--subtitle-fg); cursor: grab; padding: 0 6px; font-size: 16px; user-select: none; opacity: 0.5; }
+  .drag-handle:hover { opacity: 1; }
+  .drag-handle:active { cursor: grabbing; }
+  .col-drag  { width: 28px; text-align: center; }
+  .col-name  { width: 140px; }
+  .col-type  { width: 80px; min-width: 80px; max-width: 80px; }
+  .col-sub   { width: 80px; min-width: 80px; max-width: 80px; }
+  .col-type select, .col-sub select, .col-sub input { width: 100%; max-width: 100%; box-sizing: border-box; }
+  .col-off   { width: 50px; }
+  .col-size  { width: 50px; }
+
+  .col-del   { width: 36px; padding: 0; position: relative; }
+  .col-link  { width: 140px; padding: 0 4px; }
+  td.col-link { padding-left: 54px; }
+  .link-btn  { font-size: 11px; padding: 2px 6px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; display: inline-block; vertical-align: middle; }
+  .link-btn.linked { background: #2d7a2d; color: #fff; border-color: #2d7a2d; }
+  .link-btn.linked:hover { background: #3a9a3a; }
+  .link-clear { background: none; border: none; color: var(--subtitle-fg); font-size: 14px; padding: 2px 4px; cursor: pointer; opacity: 0.5; vertical-align: middle; }
+  .link-clear:hover { color: var(--error); opacity: 1; }
+  .page-header  { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px; }
+  .page-header > div { flex:1; }
+  .refresh-btn  { flex-shrink:0; align-self:center; font-size:12px; padding:4px 14px; opacity:0.8; }
+  .refresh-btn:hover { opacity:1; }
+  .info-badge { display:inline-block; font-size:13px; cursor:default; }
+  .menuconfig-info   { display:inline-flex; flex-direction:column; align-items:flex-start; gap:2px; cursor:default; }
+  .menuconfig-label  { color:var(--subtitle-fg); font-size:11px; }
+  .menuconfig-value  { font-family:var(--vscode-editor-font-family,monospace); font-size:13px; background:var(--badge-bg); color:var(--badge-fg); padding:1px 6px; border-radius:3px; }
+  .badge-off  { opacity:0.25; }
+  .del-btn { position: absolute; right: 15px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--subtitle-fg); font-size: 16px; padding: 2px 4px; cursor: pointer; opacity: 0.5; }
+  .del-btn:hover { color: var(--error); background: none; opacity: 1; }
+  .size-hint { font-size: 10px; color: var(--subtitle-fg); display: block; opacity: 0.7; }
+  .hex-wrap         { display: flex; align-items: center; gap: 2px; }
+  .hex-wrap input   { flex: 1; min-width: 0; }
+  .dd-btn           { flex-shrink:0; background: var(--btn-bg); border: 1px solid var(--border);
+                      color: var(--fg); border-radius: 3px; padding: 2px 5px; cursor: pointer;
+                      font-size: 10px; line-height: 1; opacity: 0.7; }
+  .dd-btn:hover     { opacity: 1; }
+  /* Portal dropdown — fixed, renders above everything */
+  #ddPortal         { position: fixed; z-index: 99999; display: none;
+                      background: var(--vscode-dropdown-background, var(--editor-bg));
+                      border: 1px solid var(--border); border-radius: 4px;
+                      box-shadow: 0 4px 16px rgba(0,0,0,0.45); padding: 4px 0;
+                      min-width: 240px; max-height: 280px; overflow-y: auto; }
+  #ddPortal.open    { display: block; }
+  .dd-item          { padding: 5px 12px; cursor: pointer; font-family: monospace; font-size: 12px;
+                      white-space: nowrap; }
+  .dd-item:hover    { background: var(--vscode-list-hoverBackground, rgba(255,255,255,0.08)); }
+  .dd-item .dd-val  { color: var(--vscode-symbolIcon-variableForeground, #9cdcfe); min-width: 80px; display: inline-block; }
+  .dd-item .dd-desc { color: var(--subtitle-fg); font-size: 11px; margin-left: 8px; }
+
+  #errorBox { background: rgba(244,71,71,0.1); border: 1px solid var(--error); border-radius: 4px; padding: 8px 12px; margin-bottom: 12px; display: none; }
+  #errorBox ul { padding-left: 16px; }
+  #errorBox li { color: var(--error); font-size: 12px; margin: 2px 0; }
+
+  .status-bar { display: flex; gap: 16px; font-size: 11px; color: var(--subtitle-fg); flex-wrap: wrap; }
+  .status-bar span b { color: var(--text); }
+  .used-pct { color: var(--ok); }
+  .row-dragging { opacity: 0.4; }
+  .row-dragover td { border-top: 2px solid var(--accent); }
+</style>
+</head>
+<body>
+<div id="ddPortal"></div>
+<div class="page-header">
+  <div>
+    <h2>⚡ ESP Partition Table Editor</h2>
+    <p class="subtitle">Visual editor for ESP8266 flash partitions → saves to <a href="#" id="csvFilenameLabel" title="Click to open CSV file" style="color:var(--accent);text-decoration:none;cursor:pointer;font-family:var(--vscode-editor-font-family,monospace);font-size:11px;background:var(--badge-bg);padding:1px 5px;border-radius:3px;">{{SAFE_FILENAME}}</a>
+    <span id="modeBadge" style="display:none;margin-left:8px;font-size:10px;padding:1px 6px;border-radius:3px;font-weight:500;"></span></p>
+    <p id="modeHintText" style="display:none;font-size:11px;color:var(--warn);margin-top:2px;"></p>
+  </div>
+  <button class="refresh-btn" onclick="vscode.postMessage({command:'refresh'})" title="Reload PT offset, Flash size and partition filename from Projectconfig">↺ Refresh</button>
+</div>
+
+<div class="flash-map-wrap">
+  <h3>Flash map</h3>
+  <div id="flashMap"></div>
+  <div class="legend" id="legend"></div>
+</div>
+
+<div id="errorBox"><ul id="errorList"></ul></div>
+
+<div class="toolbar">
+  <button onclick="addRow()">＋ Add Partition</button>
+  <button onclick="resetDefault()">↺ Default Partition</button>
+  <button onclick="autoOffsets();render();" title="Recalculate all offsets sequentially from PT end, respecting 1MB boundary">⟳ Auto Offsets</button>
+  <div style="flex:1"></div>
+  <span class="menuconfig-info" title="Partition Table Offset\nSource: menuconfig → Partition Table → Offset (CONFIG_PARTITION_TABLE_OFFSET)">
+    <span class="menuconfig-label">PT offset:</span>
+    <code id="ptOffset" class="menuconfig-value">{{SAFE_PT_OFFSET}}</code>
+  </span>
+  <span class="menuconfig-info" title="Flash Size\nSource: menuconfig → Serial Flasher Config → Flash Size (CONFIG_ESPTOOLPY_FLASHSIZE)">
+    <span class="menuconfig-label">Flash size:</span>
+    <code id="flashSizeDisplay" class="menuconfig-value">{{FLASH_SIZE_LABEL}}</code>
+    <input type="hidden" id="flashSizeSel" value="{{SAFE_FLASH_SIZE}}"/>
+  </span>
+  <button class="primary" id="saveCsvBtn" onclick="save()">💾 Save</button>
+
+</div>
+
+<div class="table-wrap">
+<table id="partTable">
+<thead>
+  <tr>
+    <th class="col-drag"></th>
+    <th class="col-name">Name</th>
+    <th class="col-type">Type</th>
+    <th class="col-sub">SubType</th>
+    <th class="col-off">Offset</th>
+    <th class="col-size">Size</th>
+    <th class="col-link">Link to bin</th>
+
+    <th class="col-del"></th>
+  </tr>
+</thead>
+<tbody id="partBody"></tbody>
+</table>
+</div>
+
+<div class="status-bar" id="statusBar"></div>
+
+<script>
+const vscode = acquireVsCodeApi();
+
+const COLORS =['#4ec9b0','#569cd6','#c586c0','#dcdcaa','#ce9178','#9cdcfe','#4fc1ff','#b5cea8','#f44747','#cca700'];
+const APP_SUBTYPES  =['factory','ota_0','ota_1'];
+const DATA_SUBTYPES =['nvs','ota','phy','fatfs','spiffs/littlefs'];
+
+let partitions = {{EXISTING_DATA}};
+let dragSrc = null;
+let binLinks = {{RESTORED_LINKS_DATA}};  // restored from CMakeLists.txt
+let binFileSizes = new Array(binLinks.length).fill(0);
+const isBuiltIn = '{{IS_BUILTIN}}' === '1';
+const modeLabel = '{{MODE_LABEL}}';
+const modeHint = '{{MODE_HINT}}';
+
+if (!partitions.length) resetDefault();
+render();
+
+// Show mode badge for built-in partition tables
+function updateModeBadge() {
+    const badge = document.getElementById('modeBadge');
+    const hint = document.getElementById('modeHintText');
+    if (!badge) return;
+    if (isBuiltIn && modeLabel) {
+        badge.style.display = 'inline';
+        badge.textContent = modeLabel;
+        badge.style.background = 'var(--warn)';
+        badge.style.color = '#000';
+        if (hint && modeHint) {
+            hint.style.display = 'block';
+            hint.textContent = '⚠ ' + modeHint;
+        }
+    } else if (modeLabel) {
+        badge.style.display = 'inline';
+        badge.textContent = modeLabel;
+        badge.style.background = 'var(--ok)';
+        badge.style.color = '#000';
+    }
+}
+updateModeBadge();
+
+document.getElementById('csvFilenameLabel').addEventListener('click', e => {
+    e.preventDefault();
+    vscode.postMessage({ command: 'open' });
+});
+
+function resetDefault() {
+  setDirty();
+  // ESP8266 hardware limit: app partition MUST NOT cross 1MB boundary.
+  // factory starts at 0x10000, so max size = 0x100000 - 0x10000 = 0xF0000 (960KB).
+  // Remaining flash (if any) is left free for user to add data partitions.
+  partitions = [
+    { name:'nvs',      type:'data', subtype:'nvs',     offset:'0x9000',  size:'0x6000'  },
+    { name:'phy_init', type:'data', subtype:'phy',     offset:'0xf000',  size:'0x1000'  },
+    { name:'factory',  type:'app',  subtype:'factory', offset:'0x10000', size:'0xF0000' },
+  ];
+  render();
+}
+
+function parseSize(s) {
+  if (!s) return NaN;
+  s = s.trim().replace(/_/g,'');
+  if (/^0[xX]/.test(s)) return parseInt(s, 16);
+  const m = s.match(/^(\d+(?:\.\d+)?)\s*([KkMm]?)$/);
+  if (!m) return NaN;
+  const n = parseFloat(m[1]);
+  const v = m[2].toUpperCase() === 'K' ? n*1024 : m[2].toUpperCase() === 'M' ? n*1048576 : n;
+  return Math.floor(v);
+}
+
+function fmtHex(n) {
+  // No artificial padding — keep natural hex (0x9000 not 0x09000)
+  return '0x' + n.toString(16).toUpperCase();
+}
+
+function getPtOffset() {
+  const el = document.getElementById('ptOffset'); const raw = (el ? (el.value || el.textContent) : '0x8000').trim();
+  const v = parseSize(raw);
+  return isNaN(v) ? 0x8000 : v;
+}
+function getPtEnd() { return getPtOffset() + 0x1000; }
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function fmtSize(n) {
+  if (n >= 1048576 && n%1048576===0) return (n/1048576)+'M';
+  if (n >= 1024    && n%1024===0)    return (n/1024)+'K';
+  return fmtHex(n);
+}
+
+// ФИКС ОШИБКИ ESP8266_RTOS_SDK: Разделы 'app' ОБЯЗАНЫ быть выровнены по 64KB (0x10000).
+function autoOffsets() {
+  let cursor = getPtEnd();
+  partitions.forEach(p => {
+    const sz = parseSize(p.size);
+    // Выравнивание: 64 КБ для app, 4 КБ для data
+    let align = (p.type === 'app') ? 0x10000 : 0x1000;
+    
+    if (cursor % align !== 0) cursor = Math.ceil(cursor / align) * align;
+
+    if (p.type === 'app' && !isNaN(sz)) {
+      if (sz <= 0x100000) {
+        const mb1start = Math.floor(cursor / 0x100000) * 0x100000;
+        const mb1end   = mb1start + 0x100000;
+        if (cursor + sz > mb1end) {
+            cursor = mb1end; 
+        }
+      }
+    }
+    
+    p.offset = fmtHex(cursor);
+    if (!isNaN(sz)) cursor += sz;
+  });
+}
+
+function validate() {
+  const errors =[];
+  const flashSize = parseInt(document.getElementById('flashSizeSel').value || '1048576');
+  const ptEnd = getPtEnd();
+  const ptOffset = getPtOffset();
+  let regions =[];
+
+  if (isNaN(ptOffset)) errors.push(`Partition table offset is invalid`);
+  if (ptOffset + 0x1000 > flashSize) errors.push(`Partition table offset ${fmtHex(ptOffset)} exceeds flash size`);
+
+  partitions.forEach((p, i) => {
+    const off = parseSize(p.offset);
+    const sz  = parseSize(p.size);
+    if (!p.name.trim())            errors.push(`Row ${i+1}: name is empty`);
+    if (p.name.length > 16)        errors.push(`Row ${i+1} "${p.name}": name too long (max 16)`);
+    if (/[^a-zA-Z0-9_]/.test(p.name)) errors.push(`Row ${i+1} "${p.name}": name may only contain a-z, 0-9, _`);
+    if (isNaN(off))                errors.push(`Row ${i+1} "${p.name}": invalid offset "${p.offset}"`);
+    if (isNaN(sz) || sz <= 0)      errors.push(`Row ${i+1} "${p.name}": invalid size "${p.size}"`);
+    if (p.type !== 'app' && p.type !== 'data') {
+      const t = parseSize(p.type);
+      if (!isNaN(t) && t < 0x40)   errors.push(`Row ${i+1} "${p.name}": custom type ${fmtHex(t)} is in reserved range 0x00-0x3F (SDK use only). Use 0x40-0xFE.`);
+      if (!isNaN(t) && t > 0xFE)   errors.push(`Row ${i+1} "${p.name}": custom type ${fmtHex(t)} exceeds max allowed value 0xFE.`);
+      // Validate custom subtype
+      const st = parseSize(p.subtype);
+      if (isNaN(st))                errors.push(`Row ${i+1} "${p.name}": invalid subtype "${p.subtype}" — must be hex (0x00-0xFE) or decimal (0-254).`);
+      else if (st > 0xFE)           errors.push(`Row ${i+1} "${p.name}": subtype ${fmtHex(st)} exceeds max allowed value 0xFE (subtype is uint8_t).`);
+    }
+    
+    if (!isNaN(off) && !isNaN(sz)) {
+      // ФИКС: Проверка выравнивания 64КБ для APP-разделов
+      if (p.type === 'app' && off % 0x10000 !== 0) {
+        errors.push(`Row ${i+1} "${p.name}": app partition offset ${fmtHex(off)} MUST be aligned to 64KB (0x10000)`);
+      } else if (off % 0x1000 !== 0) {
+        errors.push(`Row ${i+1} "${p.name}": offset ${fmtHex(off)} not aligned to 4KB (0x1000)`);
+      }
+      
+      if (sz % 0x1000 !== 0)       errors.push(`Row ${i+1} "${p.name}": size ${fmtHex(sz)} not aligned to 4KB (0x1000)`);
+      if (off + sz > flashSize)    errors.push(`Row ${i+1} "${p.name}": exceeds flash size (${fmtHex(off+sz)} > ${fmtHex(flashSize)})`);
+      if (off < ptEnd)             errors.push(`Row ${i+1} "${p.name}": offset ${fmtHex(off)} overlaps partition table (${fmtHex(ptOffset)}–${fmtHex(ptEnd)})`);
+      
+      if (p.type === 'app') {
+        const mb1start = Math.floor(off / 0x100000) * 0x100000;
+        const mb1end   = mb1start + 0x100000;
+        if (off + sz > mb1end) errors.push(`Row ${i+1} "${p.name}": ⚠️ app partition crosses 1MB boundary! ESP8266 will crash. End: ${fmtHex(off+sz)}, 1MB boundary: ${fmtHex(mb1end)}`);
+      }
+      regions.push({ name: p.name, start: off, end: off + sz, i });
+    }
+  });
+
+  for (let a = 0; a < regions.length; a++) {
+    for (let b = a+1; b < regions.length; b++) {
+      if (regions[a].start < regions[b].end && regions[b].start < regions[a].end)
+        errors.push(`Overlap: "${regions[a].name}" and "${regions[b].name}"`);
+    }
+  }
+
+  const names = partitions.map(p => p.name.trim()).filter(Boolean);
+  names.forEach((n, i) => { if (names.indexOf(n) !== i) errors.push(`Duplicate name: "${n}"`); });
+
+  const sorted = [...partitions]
+    .map(p => ({ ...p, off: parseSize(p.offset) }))
+    .filter(p => !isNaN(p.off))
+    .sort((a,b) => a.off - b.off);
+  const phyIdx  = sorted.findIndex(p => p.subtype === 'phy');
+  const ota0Idx = sorted.findIndex(p => p.type === 'app' && p.subtype !== 'factory' && p.subtype !== 'test');
+  if (phyIdx !== -1 && ota0Idx !== -1 && phyIdx > ota0Idx) {
+    errors.push(`⚠️ SDK rule: "phy_init" must be placed BEFORE any OTA app partition (ota_0/ota_1/...) in flash address order`);
+  }
+
+  partitions.forEach((p, i) => {
+    if (p.type === 'app' && (!p.offset || p.offset.trim() === '')) {
+      errors.push(`Row ${i+1} "${p.name}": app partition offset must not be empty — SDK auto-align may cause 1MB boundary overlap!`);
+    }
+  });
+
+  return errors;
+}
+
+function render() {
+  syncLinks();
+  renderTable();
+  renderMap();
+  renderStatus();
+  renderErrors();
+}
+
+function updateOnlyStatusAndMap() {
+    renderMap();
+    renderStatus();
+    renderErrors();
+    partitions.forEach((p, i) => {
+        const sz = parseSize(p.size);
+        const sh = document.getElementById('sh'+i);
+        if (sh && !isNaN(sz)) {
+            let hint = sz >= 1048576 ? (sz/1048576).toFixed(1)+'MB' : sz >= 1024 ? (sz/1024).toFixed(1)+'KB' : sz+'B';
+            if (p.subtype === 'nvs'  && sz < 0x3000) hint += ' ⚠ min 12KB';
+            if (p.subtype === 'ota'  && sz !== 0x2000) hint += ' ⚠ must be 8KB';
+            sh.textContent = hint;
+        } else if (sh) {
+            sh.textContent = '';
+        }
+    });
+}
+
+function renderTable() {
+  const tbody = document.getElementById('partBody');
+  tbody.innerHTML = '';
+
+  partitions.forEach((p, i) => {
+    const subtypes = p.type === 'app' ? APP_SUBTYPES : p.type === 'data' ? DATA_SUBTYPES : [];
+    const color = COLORS[i % COLORS.length];
+    const tr = document.createElement('tr');
+    tr.className = 'part-row';
+    tr.draggable = true;
+    tr.dataset.idx = i;
+
+    tr.innerHTML = `
+      <td class="col-drag"><span class="drag-handle" title="Drag to reorder">⠿</span></td>
+      <td class="col-name">
+        <input value="${esc(p.name)}" oninput="update(${i},'name',this.value)" style="border-left:3px solid ${color}" />
+      </td>
+      <td class="col-type">
+        <select onchange="update(${i},'type',this.value)">
+          <option ${p.type==='app' ?'selected':''}>app</option>
+          <option ${p.type==='data'?'selected':''}>data</option>
+          <option ${p.type!=='app'&&p.type!=='data'?'selected':''} value="${p.type!=='app'&&p.type!=='data'?p.type:'0x40'}">custom…</option>
+        </select>
+      </td>
+      <td class="col-sub">
+        ${(p.type==='app'||p.type==='data')
+          ? `<select onchange="update(${i},'subtype',this.value)">
+              ${subtypes.map(s=>`<option ${p.subtype===s?'selected':''}>${s}</option>`).join('')}
+            </select>`
+          : `<input value="${p.subtype}" oninput="update(${i},'subtype',this.value)" placeholder="0x00" title="Hex subtype for custom type"/>`
+        }
+      </td>
+      <td class="col-off">
+        <div class="hex-wrap">
+          <input id="offIn${i}" value="${p.offset}" oninput="update(${i},'offset',this.value)" placeholder="0x9000" />
+          <button class="dd-btn" onclick="toggleDd(this,'off',${i})" tabindex="-1" title="Show offset suggestions">▾</button>
+        </div>
+      </td>
+      <td class="col-size">
+        <div class="hex-wrap">
+          <input id="szIn${i}" value="${p.size}" oninput="update(${i},'size',this.value)" placeholder="0x6000"
+            ${binLinks[i] ? 'readonly title="Size is controlled by the linked .bin file" style="opacity:0.5;cursor:not-allowed"' : ''} />
+          ${binLinks[i] ? '' : `<button class="dd-btn" onclick="toggleDd(this,'sz',${i})" tabindex="-1" title="Show size suggestions">▾</button>`}
+        </div>
+        <span class="size-hint" id="sh${i}"></span>
+      </td>
+      <td class="col-link">
+        ${(['fatfs','spiffs','spiffs/littlefs'].includes(p.subtype))
+          ? (binLinks[i]
+              ? `<span title="${binLinks[i]}"><button class="link-clear" onclick="clearLink(${i})" title="Remove link" style="margin-right:6px">✕</button><button class="link-btn linked" onclick="linkBin(${i})" title="${binLinks[i]}">${binLinks[i].replace(/\\/g,'/').split('/').pop()}</button></span>`
+              : `<button class="link-btn" onclick="linkBin(${i})" title="Link a .bin file to this partition">+ Link bin</button>`)
+          : ''
+        }
+      </td>
+
+      <td class="col-del">
+        <button class="del-btn" onclick="delRow(${i})" title="Delete">✕</button>
+      </td>
+    `;
+
+    // Drag only from handle — prevent accidental drag from inputs/selects
+    tr.draggable = false;
+    const handle = tr.querySelector('.drag-handle');
+    if (handle) {
+      handle.addEventListener('mousedown', () => { tr.draggable = true; });
+      handle.addEventListener('mouseup',   () => { tr.draggable = false; });
+    }
+    tr.addEventListener('dragstart', e => { dragSrc = i; tr.classList.add('row-dragging'); e.dataTransfer.effectAllowed = 'move'; });
+    tr.addEventListener('dragend',   e => { tr.draggable = false; tr.classList.remove('row-dragging'); document.querySelectorAll('.row-dragover').forEach(r=>r.classList.remove('row-dragover')); });
+    tr.addEventListener('dragover',  e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; tr.classList.add('row-dragover'); });
+    tr.addEventListener('dragleave', e => { if (!tr.contains(e.relatedTarget)) tr.classList.remove('row-dragover'); });
+    tr.addEventListener('drop',      e => { e.preventDefault(); tr.classList.remove('row-dragover'); if (dragSrc !== null && dragSrc !== i) { const moved = partitions.splice(dragSrc,1)[0]; partitions.splice(i,0,moved); const movedLink = binLinks.splice(dragSrc,1)[0]; binLinks.splice(i,0,movedLink); const movedSize = binFileSizes.splice(dragSrc,1)[0]; binFileSizes.splice(i,0,movedSize); dragSrc=null; render(); }});
+
+    tbody.appendChild(tr);
+
+    const sz = parseSize(p.size);
+    const sh = document.getElementById('sh'+i);
+    if (sh && !isNaN(sz)) {
+      let hint = sz >= 1048576 ? (sz/1048576).toFixed(1)+'MB' : sz >= 1024 ? (sz/1024).toFixed(1)+'KB' : sz+'B';
+      if (p.subtype === 'nvs'  && sz < 0x3000) hint += ' ⚠ min 12KB';
+      if (p.subtype === 'ota'  && sz !== 0x2000) hint += ' ⚠ must be 8KB';
+      sh.textContent = hint;
+    }
+  });
+}
+
+function renderMap() {
+  const flashSize = parseInt(document.getElementById('flashSizeSel').value || '1048576');
+  const ptOffset  = getPtOffset();
+  const ptEnd     = getPtEnd();
+  const map = document.getElementById('flashMap');
+  const legend = document.getElementById('legend');
+  map.innerHTML = ''; legend.innerHTML = '';
+
+  let sorted = partitions
+    .map((p,i) => ({ ...p, off: parseSize(p.offset), sz: parseSize(p.size), i }))
+    .filter(p => !isNaN(p.off) && !isNaN(p.sz) && p.sz > 0)
+    .sort((a,b) => a.off - b.off);
+
+  if (!sorted.length && ptOffset >= flashSize) {
+    const div = document.createElement('div');
+    div.className = 'seg free'; div.style.flex = '1';
+    div.textContent = 'no partitions'; map.appendChild(div); return;
+  }
+
+  const mapStart = ptOffset;
+  const mapSize  = flashSize - mapStart;
+
+  const allSegs =[];
+  allSegs.push({ pt: true, start: ptOffset, size: 0x1000 });
+
+  let cursor = ptEnd;
+  sorted.forEach(p => {
+    if (p.off > cursor) allSegs.push({ free: true, start: cursor, size: p.off - cursor });
+    allSegs.push({ free: false, ...p });
+    cursor = p.off + p.sz;
+  });
+  if (cursor < flashSize) allSegs.push({ free: true, start: cursor, size: flashSize - cursor });
+
+  const ptLi = document.createElement('div');
+  ptLi.className = 'legend-item';
+  ptLi.innerHTML = `<div class="legend-dot" style="background:#888;opacity:0.7"></div><span style="opacity:0.7">partition table <span style="color:var(--subtitle-fg)">${fmtHex(ptOffset)}</span></span>`;
+  legend.appendChild(ptLi);
+
+  allSegs.forEach(s => {
+    const div = document.createElement('div');
+    const pct = (s.size / flashSize * 100).toFixed(1);
+    div.style.flex = Math.max(s.size / mapSize, 0.001);
+
+    if (s.pt) {
+      div.className = 'seg';
+      div.style.background = 'repeating-linear-gradient(45deg,#555,#555 3px,#444 3px,#444 6px)';
+      div.style.opacity = '0.8';
+      div.title = `Partition Table\nOffset: ${fmtHex(s.start)}\nSize: 4KB`;
+    } else if (s.free) {
+      div.className = 'seg free';
+      div.title = `Free: ${fmtSize(s.size)} (${pct}% of flash)`;
+      if (parseFloat(pct) > 5) div.textContent = 'free';
+    } else {
+      div.className = 'seg';
+      const color = COLORS[s.i % COLORS.length];
+      div.style.background = color;
+      div.style.color = '#000';
+      div.title = `${s.name}\nOffset: ${fmtHex(s.off)}\nSize: ${fmtSize(s.sz)} (${pct}%)`;
+      if (parseFloat(pct) > 3) div.textContent = s.name;
+
+      // Безопасный XSS-френдли код (исправлено)
+      const li = document.createElement('div');
+      li.className = 'legend-item';
+      const dot = document.createElement('div');
+      dot.className = 'legend-dot';
+      dot.style.background = color;
+      li.appendChild(dot);
+      const nameText = document.createTextNode(' ' + s.name + ' ');
+      li.appendChild(nameText);
+      const span = document.createElement('span');
+      span.style.color = 'var(--subtitle-fg)';
+      span.textContent = fmtSize(s.sz);
+      li.appendChild(span);
+      legend.appendChild(li);
+    }
+    map.appendChild(div);
+  });
+}
+
+function renderStatus() {
+  const flashSize = parseInt(document.getElementById('flashSizeSel').value || '1048576');
+  const ptOffset  = getPtOffset();
+  let maxEnd = getPtEnd();
+  partitions.forEach(p => {
+    const off = parseSize(p.offset), sz = parseSize(p.size);
+    if (!isNaN(off) && !isNaN(sz)) maxEnd = Math.max(maxEnd, off + sz);
+  });
+  const used = maxEnd - ptOffset;
+  const free = flashSize - maxEnd;
+  const pct  = (used / flashSize * 100).toFixed(1);
+  document.getElementById('statusBar').innerHTML =
+    `<span>Flash: <b>${fmtSize(flashSize)}</b></span>
+     <span>Used: <b>${fmtSize(used)}</b> (${pct}%)</span>
+     <span class="used-pct">Free: <b>${free >= 0 ? fmtSize(free) : '⚠️ OVERFLOW'}</b></span>
+     <span>Partitions: <b>${partitions.length}</b></span>`;
+}
+
+function renderErrors() {
+  const errors = validate();
+  const box = document.getElementById('errorBox');
+  const list = document.getElementById('errorList');
+  list.innerHTML = errors.map(e=>`<li>${e}</li>`).join('');
+  box.style.display = errors.length ? 'block' : 'none';
+}
+
+function setDirty() {
+  vscode.postMessage({ command: 'setDirty', dirty: true });
+}
+
+function update(i, field, value) {
+  partitions[i][field] = value;
+  setDirty();
+
+  if (field === 'size' && binLinks[i] && binFileSizes[i]) {
+    // Size changed manually — just re-render, bin link stays
+  }
+
+  if (field === 'type') {
+    if (value === 'app')  partitions[i].subtype = 'factory';
+    else if (value === 'data') partitions[i].subtype = 'nvs';
+    else partitions[i].subtype = '0x00';
+    // Clear link — new subtype is not fatfs/spiffs/littlefs
+    binLinks[i] = null; binFileSizes[i] = 0;
+    renderTable();
+  }
+
+  if (field === 'subtype' && !['fatfs','spiffs','spiffs/littlefs'].includes(value)) {
+    // Clear link when switching away from fatfs/spiffs/littlefs
+    if (binLinks[i]) { binLinks[i] = null; binFileSizes[i] = 0; }
+  }
+
+  updateOnlyStatusAndMap();
+}
+
+function addRow() {
+  setDirty();
+  let maxEnd = 0;
+  partitions.forEach(p => {
+    const off = parseSize(p.offset), sz = parseSize(p.size);
+    if (!isNaN(off) && !isNaN(sz)) maxEnd = Math.max(maxEnd, off+sz);
+  });
+  if (maxEnd % 4096 !== 0) maxEnd = Math.ceil(maxEnd/4096)*4096;
+  if (maxEnd === 0) maxEnd = getPtEnd();
+  // Generate unique name
+  const existingNames = new Set(partitions.map(p => p.name));
+  let newName = 'new_part';
+  let counter = 1;
+  while (existingNames.has(newName)) { newName = 'new_part_' + counter++; }
+  partitions.push({ name: newName, type:'data', subtype:'nvs', offset: fmtHex(maxEnd), size:'0x10000' });
+  render();
+}
+
+function delRow(i) {
+  setDirty();
+  partitions.splice(i, 1);
+  binLinks.splice(i, 1);
+  binFileSizes.splice(i, 1);
+  render();
+}
+
+
+function toCsv() {
+  const lines =[
+    '# ESP Partition Table',
+    '# Generated by ESP-IDF Tools VSCode Extension',
+    '# Name,   Type, SubType, Offset,  Size',
+  ];
+  partitions.forEach(p => {
+    // Map display subtype back to CSV-compatible value
+    const csvSubtype = p.subtype === 'spiffs/littlefs' ? 'spiffs' : p.subtype === 'fatfs' ? 'fat' : p.subtype;
+    lines.push(`${p.name},${p.type},${csvSubtype},${p.offset},${p.size}`);
+  });
+  return lines.join('\n') + '\n';
+}
+
+function linkBin(i) {
+  const flashSizeEl = document.getElementById('flashSizeSel');
+  const flashSizeVal = flashSizeEl ? parseInt(flashSizeEl.value || '1048576') : 1048576;
+  vscode.postMessage({ command: 'linkBin', index: i, partitions: partitions, flashSize: flashSizeVal });
+}
+function clearLink(i) {
+  binLinks[i] = null;
+  binFileSizes[i] = 0;
+  setDirty();
+  render();
+}
+
+// Keep binLinks same length as partitions
+function syncLinks() {
+  while (binLinks.length < partitions.length) { binLinks.push(null); binFileSizes.push(0); }
+  binLinks.length = partitions.length;
+  binFileSizes.length = partitions.length;
+}
+
+function save() {
+  const errors = validate();
+  if (errors.length) {
+    vscode.postMessage({ command: 'saveWithErrors', csv: toCsv(), errors: errors, binLinks: binLinks });
+    return;
+  }
+  vscode.postMessage({ command: 'setDirty', dirty: false });
+  vscode.postMessage({ command: 'save', csv: toCsv(), binLinks: binLinks });
+}
+
+
+window.addEventListener('message', e => {
+  const msg = e.data;
+  if (msg.command === 'setBusy') {
+    const btn = document.getElementById('saveCsvBtn');
+    if (btn) {
+      btn.disabled = msg.busy;
+      btn.title    = msg.busy ? ('🔒 Locked — "' + msg.task + '" is running') : '';
+      btn.style.opacity = msg.busy ? '0.4' : '';
+      btn.style.cursor  = msg.busy ? 'not-allowed' : '';
+    }
+    return;
+  }
+  if (msg.command === 'applySizeUpdatesOnOpen') {
+    msg.updates.forEach(u => {
+      if (partitions[u.index]) {
+        partitions[u.index].size = '0x' + u.newSize.toString(16).toUpperCase();
+        binFileSizes[u.index] = u.fileSize;
+      }
+    });
+    setDirty();
+    render();
+    return;
+  }
+
+  if (msg.command === 'setBinLink') {
+    binLinks[msg.index] = msg.binPath;
+    binFileSizes[msg.index] = msg.fileSize || 0;
+    // Auto-adjust partition SIZE to match the bin file (rounded up to 4096)
+    if (msg.newSize && msg.newSize > 0) {
+      partitions[msg.index].size = '0x' + msg.newSize.toString(16).toUpperCase();
+    }
+    setDirty();
+    render();
+    return;
+  }
+  if (msg.command !== 'sdkconfigUpdate') return;
+  const ptEl = document.getElementById('ptOffset');
+  if (ptEl) ptEl.textContent = msg.ptOffset;
+  const fsEl  = document.getElementById('flashSizeSel');
+  const fsDis = document.getElementById('flashSizeDisplay');
+  if (fsEl) { fsEl.value = msg.flashSize; }
+  const fsLabels = {'524288':'512\u202fKB','1048576':'1\u202fMB','2097152':'2\u202fMB','4194304':'4\u202fMB','8388608':'8\u202fMB','16777216':'16\u202fMB'};
+  if (fsDis) fsDis.textContent = fsLabels[msg.flashSize] || msg.flashSize + ' B';
+  const csvEl = document.getElementById('csvFilenameLabel');
+  if (csvEl && msg.csvFilename) csvEl.textContent = msg.csvFilename;
+
+  // Apply bin file size updates — re-check files changed outside VS Code
+  if (msg.binSizeUpdates && msg.binSizeUpdates.length > 0) {
+    const warnings = [];
+    msg.binSizeUpdates.forEach(u => {
+      if (u.missing) {
+        warnings.push(`Linked file for partition #${u.index + 1} no longer exists — link removed.`);
+        binLinks[u.index] = null;
+        binFileSizes[u.index] = 0;
+        return;
+      }
+      const prevSize = parseSize(partitions[u.index]?.size || '0');
+      if (u.newSize !== prevSize) {
+        binFileSizes[u.index] = u.fileSize;
+        partitions[u.index].size = '0x' + u.newSize.toString(16).toUpperCase();
+        warnings.push(`Partition "${partitions[u.index]?.name}": size updated to ${(u.newSize/1024).toFixed(0)} KB to match linked bin file.`);
+      }
+    });
+    if (warnings.length > 0) {
+      vscode.postMessage({ command: 'binSizeWarnings', warnings });
+      setDirty();
+    }
+  }
+
+  render();
+});
+
+// ─── Custom hex dropdown ──────────────────────────────────────────────────────
+const DD_OFFSET = [
+  ['0x9000',   'after partition table'],
+  ['0xd000',   'otadata start'],
+  ['0xf000',   'phy_init start'],
+  ['0x10000',  'app start (64KB aligned)'],
+  ['0x80000',  '512KB boundary'],
+  ['0x100000', '1MB boundary'],
+  ['0x110000', 'after 1MB OTA layout'],
+  ['0x200000', '2MB boundary'],
+  ['0x300000', '3MB boundary'],
+];
+const DD_SIZE_DATA = [
+  ['0x1000',   '4 KB  — phy_init'],
+  ['0x2000',   '8 KB  — otadata'],
+  ['0x4000',   '16 KB — nvs min'],
+  ['0x6000',   '24 KB — nvs default'],
+  ['0x8000',   '32 KB'],
+  ['0x10000',  '64 KB'],
+  ['0x40000',  '256 KB'],
+  ['0x100000', '1 MB'],
+];
+const DD_SIZE_APP = [
+  ['0x40000',  '256 KB'],
+  ['0x60000',  '384 KB'],
+  ['0x70000',  '448 KB — OTA slot 1MB flash'],
+  ['0x80000',  '512 KB'],
+  ['0xF0000',  '960 KB — factory 1MB flash'],
+  ['0x100000', '1 MB'],
+  ['0x180000', '1.5 MB'],
+  ['0x200000', '2 MB'],
+  ['0x300000', '3 MB'],
+];
+
+// ─── Portal dropdown state ───────────────────────────────────────────────────
+let _ddOpenBtn  = null;  // button that opened the portal
+let _ddInputId  = null;  // input id to fill on pick
+let _ddIdx      = null;  // partition row index
+let _ddKind     = null;  // 'off' | 'sz'
+
+function toggleDd(btn, kind, idx) {
+  const portal = document.getElementById('ddPortal');
+  if (!portal) return;
+
+  // Close if same button clicked again
+  if (_ddOpenBtn === btn) { closeAllDd(); return; }
+  closeAllDd();
+
+  // Determine which input to fill
+  const inputId = kind === 'off' ? 'offIn'+idx : 'szIn'+idx;
+  _ddOpenBtn = btn;
+  _ddInputId = inputId;
+  _ddIdx     = idx;
+  _ddKind    = kind;
+
+  // Build options list
+  const opts = kind === 'off'
+    ? DD_OFFSET
+    : (partitions[idx] && partitions[idx].type === 'app') ? DD_SIZE_APP : DD_SIZE_DATA;
+
+  portal.innerHTML = opts.map(([val, desc]) =>
+    `<div class="dd-item" onmousedown="pickDd(event,'${val}')">
+       <span class="dd-val">${val}</span><span class="dd-desc">${desc}</span>
+     </div>`
+  ).join('');
+
+  // Position portal below the button using fixed coords
+  const rect  = btn.getBoundingClientRect();
+  const vpW   = window.innerWidth;
+  const vpH   = window.innerHeight;
+  const ddW   = Math.max(rect.width + 160, 240);
+
+  portal.style.minWidth = ddW + 'px';
+
+  // Horizontal: open right-aligned if not enough space on the right
+  if (rect.left + ddW > vpW - 8) {
+    portal.style.left  = '';
+    portal.style.right = (vpW - rect.right) + 'px';
+  } else {
+    portal.style.right = '';
+    portal.style.left  = rect.left + 'px';
+  }
+
+  // Vertical: open above if not enough space below
+  if (rect.bottom + 280 > vpH) {
+    portal.style.top    = '';
+    portal.style.bottom = (vpH - rect.top + 2) + 'px';
+  } else {
+    portal.style.bottom = '';
+    portal.style.top    = (rect.bottom + 2) + 'px';
+  }
+
+  portal.classList.add('open');
+}
+
+function pickDd(e, val) {
+  e.preventDefault();
+  if (_ddInputId) {
+    const inp = document.getElementById(_ddInputId);
+    if (inp) { inp.value = val; }
+  }
+  const field = _ddKind === 'off' ? 'offset' : 'size';
+  update(_ddIdx, field, val);
+  closeAllDd();
+}
+
+function closeAllDd() {
+  const portal = document.getElementById('ddPortal');
+  if (portal) portal.classList.remove('open');
+  _ddOpenBtn = null;
+  _ddInputId = null;
+  _ddIdx     = null;
+  _ddKind    = null;
+}
+
+document.addEventListener('click', e => {
+  if (_ddOpenBtn && !e.target.closest('.hex-wrap') && e.target !== document.getElementById('ddPortal') && !e.target.closest('#ddPortal')) {
+    closeAllDd();
+  }
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,854 @@
+{
+	"name": "esp8266-idf",
+	"displayName": "ESP8266-IDF",
+	"description": "Build, flash, monitor and configure ESP8266-series projects (ESP8266, ESP8285) using ESP8266_RTOS_SDK (idf.py). Supports Windows, Linux and macOS.",
+	"version": "1.83.0",
+	"publisher": "Dzantemir",
+	"author": "Dzantemir",
+	"license": "MIT",
+	"engines": {
+		"vscode": "^1.75.0"
+	},
+	"categories": [
+		"Other",
+		"Debuggers",
+		"Programming Languages"
+	],
+	"keywords": [
+		"esp8266",
+		"esp8285",
+		"espressif",
+		"iot",
+		"embedded",
+		"rtos",
+		"idf",
+		"idf.py",
+		"flash",
+		"serial",
+		"monitor",
+		"menuconfig",
+		"partition",
+		"firmware",
+		"microcontroller",
+		"littlefs",
+		"filesystem"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/Dzantemir/ESP8266-IDF.git"
+	},
+	"bugs": {
+		"url": "https://github.com/Dzantemir/ESP8266-IDF/issues"
+	},
+	"homepage": "https://github.com/Dzantemir/ESP8266-IDF#readme",
+	"icon": "media/icon.png",
+	"activationEvents": [
+		"onView:esp8266-idf.projectView",
+		"workspaceContains:sdkconfig",
+		"workspaceContains:CMakeLists.txt",
+		"onCommand:esp.build",
+		"onCommand:esp.flash",
+		"onCommand:esp.monitor",
+		"onCommand:esp.partitionEditor",
+		"onCommand:esp.otaFlash",
+		"onCommand:esp.flashFileSystem",
+		"onCommand:esp.createProject"
+	],
+	"main": "./src/extension.js",
+	"contributes": {
+		"problemMatchers": [
+			{
+				"name": "esp-idf-gcc",
+				"owner": "cpp",
+				"fileLocation": [
+					"relative",
+					"${workspaceFolder}"
+				],
+				"pattern": {
+					"regexp": "^(.*):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$",
+					"file": 1,
+					"line": 2,
+					"column": 3,
+					"severity": 4,
+					"message": 5
+				}
+			}
+		],
+		"viewsContainers": {
+			"activitybar": [
+				{
+					"id": "esp8266-idf-explorer",
+					"title": "ESP-IDF",
+					"icon": "media/icon_mono.svg"
+				}
+			]
+		},
+		"views": {
+			"esp8266-idf-explorer": [
+				{
+					"id": "esp8266-idf.projectView",
+					"name": "Project & Commands",
+					"icon": "media/icon_mono.svg"
+				}
+			]
+		},
+		"commands": [
+			{
+				"command": "esp.build",
+				"title": "ESP › Build"
+			},
+			{
+				"command": "esp.buildApp",
+				"title": "ESP › Build App"
+			},
+			{
+				"command": "esp.buildBootloader",
+				"title": "ESP › Build Bootloader"
+			},
+			{
+				"command": "esp.buildPartition",
+				"title": "ESP › Build Partition Table"
+			},
+			{
+				"command": "esp.size",
+				"title": "ESP › Size"
+			},
+			{
+				"command": "esp.sizeComponents",
+				"title": "ESP › Size Components"
+			},
+			{
+				"command": "esp.sizeFiles",
+				"title": "ESP › Size Files"
+			},
+			{
+				"command": "esp.menuconfig",
+				"title": "ESP › Menuconfig"
+			},
+			{
+				"command": "esp.reconfigure",
+				"title": "ESP › Reconfigure"
+			},
+			{
+				"command": "esp.clean",
+				"title": "ESP › Clean"
+			},
+			{
+				"command": "esp.fullclean",
+				"title": "ESP › Full Clean"
+			},
+			{
+				"command": "esp.flash",
+				"title": "ESP › Flash"
+			},
+			{
+				"command": "esp.monitor",
+				"title": "ESP › Monitor"
+			},
+			{
+				"command": "esp.flashMonitor",
+				"title": "ESP › Flash & Monitor"
+			},
+			{
+				"command": "esp.flashApp",
+				"title": "ESP › Flash App"
+			},
+			{
+				"command": "esp.flashBootloader",
+				"title": "ESP › Flash Bootloader"
+			},
+			{
+				"command": "esp.flashPartition",
+				"title": "ESP › Flash Partition Table"
+			},
+			{
+				"command": "esp.eraseFlash",
+				"title": "ESP › Erase Flash"
+			},
+			{
+				"command": "esp.stopMonitor",
+				"title": "ESP › Stop Monitor"
+			},
+			{
+				"command": "esp.spiffs",
+				"title": "ESP › Make SPIFFS"
+			},
+			{
+				"command": "esp.fatfs",
+				"title": "ESP › Make FATFS"
+			},
+			{
+				"command": "esp.littlefs",
+				"title": "ESP › Make LittleFS"
+			},
+			{
+				"command": "esp.flashFileSystem",
+				"title": "ESP › Flash File System",
+				"icon": "$(zap)"
+			},
+			{
+				"command": "esp.generateIntelliSense",
+				"title": "ESP › Generate IntelliSense Config"
+			},
+			{
+				"command": "esp.generateTasks",
+				"title": "ESP › Generate tasks.json"
+			},
+			{
+				"command": "esp.createProject",
+				"title": "ESP › Create New Project"
+			},
+			{
+				"command": "esp.selectPort",
+				"title": "ESP › Select Port"
+			},
+			{
+				"command": "esp.selectFlashBaud",
+				"title": "ESP › Select Flash Baud Rate"
+			},
+			{
+				"command": "esp.selectIdf",
+				"title": "ESP › Select IDF Path"
+			},
+			{
+				"command": "esp.selectProject",
+				"title": "ESP › Select Project"
+			},
+			{
+				"command": "esp.toggleOverride",
+				"title": "ESP › Toggle Flash Override"
+			},
+			{
+				"command": "esp.selectFlashMode",
+				"title": "ESP › Select Flash Mode"
+			},
+			{
+				"command": "esp.selectFlashFreq",
+				"title": "ESP › Select Flash Frequency"
+			},
+			{
+				"command": "esp.selectFlashSize",
+				"title": "ESP › Select Flash Size"
+			},
+			{
+				"command": "esp.toggleCompressedUpload",
+				"title": "ESP › Toggle Compressed Upload"
+			},
+			{
+				"command": "esp.selectBeforeFlashing",
+				"title": "ESP › Select Chip Reset Before Flash (esptool --before)"
+			},
+			{
+				"command": "esp.selectAfterFlashing",
+				"title": "ESP › Select Chip Reset After Flash (esptool --after)"
+			},
+			{
+				"command": "esp.configureBuild",
+				"title": "ESP › Configure Build Actions",
+				"icon": "$(checklist)"
+			},
+			{
+				"command": "esp.configureFlash",
+				"title": "ESP › Configure Flash Actions",
+				"icon": "$(checklist)"
+			},
+			{
+				"command": "esp.refreshViews",
+				"title": "ESP › Refresh",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "esp.collapseAll",
+				"title": "ESP › Collapse All",
+				"icon": "$(collapse-all)"
+			},
+			{
+				"command": "esp.partitionEditor",
+				"title": "ESP › Partition Table Editor"
+			},
+			{
+				"command": "esp.otaFlash",
+				"title": "ESP › OTA Flash (Write firmware to OTA slot)",
+				"icon": "$(cloud-upload)"
+			},
+			{
+				"command": "esp.otaSwitch",
+				"title": "ESP › OTA Switch (Change boot partition)",
+				"icon": "$(arrow-swap)"
+			},
+			{
+				"command": "esp.otaRead",
+				"title": "ESP › OTA Read Status",
+				"icon": "$(eye)"
+			},
+			{
+				"command": "esp.otaErase",
+				"title": "ESP › OTA Erase Partition",
+				"icon": "$(trash)"
+			},
+			{
+				"command": "esp.addComponent",
+				"title": "ESP › Create New Component",
+				"icon": "$(add)"
+			},
+			{
+				"command": "esp.deleteComponent",
+				"title": "ESP › Delete Component",
+				"icon": "$(trash)"
+			},
+			{
+				"command": "esp.fixPython",
+				"title": "ESP › Download Python 3.7"
+			},
+			{
+				"command": "esp.fixSdk",
+				"title": "ESP › Clone or Set SDK Path"
+			},
+			{
+				"command": "esp.setPythonPath",
+				"title": "ESP › Set Python 3.7 folder"
+			},
+			{
+				"command": "esp.editComponent",
+				"title": "ESP › Edit Component",
+				"icon": "$(edit)"
+			},
+			{
+				"command": "esp.showRtosSdkInfo",
+				"title": "ESP › Show RTOS SDK Info",
+				"icon": "$(info)"
+			},
+			{
+				"command": "esp.configureFlashApp",
+				"title": "ESP › Configure Flash App",
+				"icon": "$(list-unordered)"
+			},
+			{
+				"command": "esp.configureFlashFs",
+				"title": "ESP › Configure Flash File System",
+				"icon": "$(list-unordered)"
+			},
+			{
+				"command": "esp.resetConfig",
+				"title": "ESP › Reset Project Config"
+			},
+			{
+				"command": "esp.editProject",
+				"title": "ESP › CMake Editor",
+				"icon": "$(edit)"
+			},
+			{
+				"command": "esp.clearProject",
+				"title": "ESP › Clear Project Folder",
+				"icon": "$(close)"
+			},
+			{
+				"command": "esp.configureBuildSimple",
+				"title": "ESP › Configure Build",
+				"icon": "$(list-unordered)"
+			},
+			{
+				"command": "esp.cmakeEditorMain",
+				"title": "ESP › CMake Editor (main)",
+				"icon": "$(file-code)"
+			},
+			{
+				"command": "esp.cmakeEditorComponent",
+				"title": "ESP › CMake Editor (component)",
+				"icon": "$(edit)"
+			},
+			{
+				"command": "esp.cmakeEditorRoot",
+				"title": "ESP › CMake Editor (root)",
+				"icon": "$(root-folder-opened)"
+			}
+		],
+		"menus": {
+			"commandPalette": [
+				{
+					"command": "esp.cmakeEditorComponent",
+					"when": "false"
+				}
+			],
+			"view/item/context": [
+				{
+					"command": "esp.configureBuild",
+					"when": "view == esp8266-idf.projectView && viewItem == buildItem && !esp.busy",
+					"group": "inline"
+				},
+				{
+					"command": "esp.configureFlash",
+					"when": "view == esp8266-idf.projectView && viewItem == flashItem && !esp.busy",
+					"group": "inline"
+				},
+				{
+					"command": "esp.toggleOverride",
+					"when": "view == esp8266-idf.projectView && viewItem == sourceItem && !esp.busy",
+					"group": "inline"
+				},
+				{
+					"command": "esp.addComponent",
+					"when": "view == esp8266-idf.projectView && viewItem == componentsGroup && !esp.busy",
+					"group": "inline"
+				},
+				{
+					"command": "esp.cmakeEditorComponent",
+					"when": "view == esp8266-idf.projectView && viewItem == componentItem && !esp.busy",
+					"group": "inline@1"
+				},
+				{
+					"command": "esp.deleteComponent",
+					"when": "view == esp8266-idf.projectView && viewItem == componentItem && !esp.busy",
+					"group": "inline@2"
+				},
+				{
+					"command": "esp.showRtosSdkInfo",
+					"when": "view == esp8266-idf.projectView && viewItem == rtosIdfItem && !esp.busy",
+					"group": "inline"
+				},
+				{
+					"command": "esp.configureFlashApp",
+					"when": "view == esp8266-idf.projectView && viewItem == flashAppItem && !esp.busy",
+					"group": "inline"
+				},
+				{
+					"command": "esp.configureFlashFs",
+					"when": "view == esp8266-idf.projectView && viewItem == flashFsItem && !esp.busy",
+					"group": "inline"
+				},
+				{
+					"command": "esp.cmakeEditorRoot",
+					"when": "view == esp8266-idf.projectView && viewItem == projectFolderGroupActive && !esp.busy",
+					"group": "inline@1"
+				},
+				{
+					"command": "esp.cmakeEditorMain",
+					"when": "view == esp8266-idf.projectView && viewItem == projectFolderGroupActive && !esp.busy",
+					"group": "inline@2"
+				},
+				{
+					"command": "esp.clearProject",
+					"when": "view == esp8266-idf.projectView && viewItem == projectFolderGroupActive && !esp.busy",
+					"group": "inline@3"
+				},
+				{
+					"command": "esp.configureBuildSimple",
+					"when": "view == esp8266-idf.projectView && viewItem == buildItemSimple && !esp.busy",
+					"group": "inline"
+				}
+			],
+			"view/title": [
+				{
+					"command": "esp.collapseAll",
+					"when": "view == esp8266-idf.projectView && !esp.busy",
+					"group": "navigation@1"
+				},
+				{
+					"command": "esp.refreshViews",
+					"when": "view == esp8266-idf.projectView && !esp.busy",
+					"group": "navigation@2"
+				}
+			]
+		},
+		"keybindings": [
+			{
+				"command": "esp.build",
+				"key": "ctrl+alt+b",
+				"mac": "cmd+alt+b",
+				"when": "!esp.busy"
+			},
+			{
+				"command": "esp.flash",
+				"key": "ctrl+alt+f",
+				"mac": "cmd+alt+f",
+				"when": "!esp.busy"
+			},
+			{
+				"command": "esp.monitor",
+				"key": "ctrl+alt+m",
+				"mac": "cmd+alt+m",
+				"when": "!esp.busy && !esp.monitorRunning"
+			},
+			{
+				"command": "esp.stopMonitor",
+				"key": "ctrl+alt+m",
+				"mac": "cmd+alt+m",
+				"when": "!esp.busy && esp.monitorRunning"
+			},
+			{
+				"command": "esp.menuconfig",
+				"key": "ctrl+alt+g",
+				"mac": "cmd+alt+g",
+				"when": "!esp.busy"
+			},
+			{
+				"command": "esp.eraseFlash",
+				"key": "ctrl+alt+e",
+				"mac": "cmd+alt+e",
+				"when": "!esp.busy"
+			}
+		],
+		"configuration": {
+			"title": "ESP-IDF Tools",
+			"properties": {
+				"esp8266-idf.postBuildAction": {
+					"type": "string",
+					"enum": [
+						"none",
+						"flash"
+					],
+					"enumDescriptions": [
+						"Build only",
+						"Auto flash after build"
+					],
+					"default": "none",
+					"description": "Action after successful build"
+				},
+				"esp8266-idf.postFlashAction": {
+					"type": "string",
+					"enum": [
+						"none",
+						"monitor"
+					],
+					"enumDescriptions": [
+						"Flash only",
+						"Auto open monitor after flash"
+					],
+					"default": "none",
+					"description": "Action after successful flash"
+				},
+				"esp8266-idf.preBuildAction": {
+					"type": "string",
+					"enum": [
+						"none",
+						"clean",
+						"fullclean"
+					],
+					"enumDescriptions": [
+						"No clean",
+						"Clean (clean)",
+						"Full clean (fullclean)"
+					],
+					"default": "none",
+					"description": "Action before Build"
+				},
+				"esp8266-idf.preBuildAppAction": {
+					"type": "string",
+					"enum": [
+						"none",
+						"clean",
+						"fullclean"
+					],
+					"enumDescriptions": [
+						"No clean",
+						"Clean (clean)",
+						"Full clean (fullclean)"
+					],
+					"default": "none",
+					"description": "Action before Build App"
+				},
+				"esp8266-idf.postBuildAppAction": {
+					"type": "string",
+					"enum": [
+						"none",
+						"app_flash"
+					],
+					"enumDescriptions": [
+						"Build only",
+						"Auto flash app only after build"
+					],
+					"default": "none",
+					"description": "Action after successful Build App"
+				},
+				"esp8266-idf.preBuildBootloaderAction": {
+					"type": "string",
+					"enum": [
+						"none",
+						"clean",
+						"fullclean"
+					],
+					"enumDescriptions": [
+						"No clean",
+						"Clean (clean)",
+						"Full clean (fullclean)"
+					],
+					"default": "none",
+					"description": "Action before Build Bootloader"
+				},
+				"esp8266-idf.postBuildBootloaderAction": {
+					"type": "string",
+					"enum": [
+						"none",
+						"flash_bootloader"
+					],
+					"enumDescriptions": [
+						"Build only",
+						"Auto flash bootloader after build"
+					],
+					"default": "none",
+					"description": "Action after successful Build Bootloader"
+				},
+				"esp8266-idf.preBuildPartitionAction": {
+					"type": "string",
+					"enum": [
+						"none",
+						"clean",
+						"fullclean"
+					],
+					"enumDescriptions": [
+						"No clean",
+						"Clean (clean)",
+						"Full clean (fullclean)"
+					],
+					"default": "none",
+					"description": "Action before Build Partition Table"
+				},
+				"esp8266-idf.postBuildPartitionAction": {
+					"type": "string",
+					"enum": [
+						"none",
+						"flash_partition"
+					],
+					"enumDescriptions": [
+						"Build only",
+						"Auto flash partition table after build"
+					],
+					"default": "none",
+					"description": "Action after successful Build Partition Table"
+				},
+				"esp8266-idf.preFlashAppAction": {
+					"type": "string",
+					"enum": [
+						"none"
+					],
+					"enumDescriptions": [
+						"Flash only (erase not applicable)"
+					],
+					"default": "none",
+					"description": "Action before Flash App"
+				},
+				"esp8266-idf.postFlashAppAction": {
+					"type": "string",
+					"enum": [
+						"none",
+						"monitor"
+					],
+					"enumDescriptions": [
+						"Flash only",
+						"Auto open monitor after flash"
+					],
+					"default": "none",
+					"description": "Action after successful Flash App"
+				},
+				"esp8266-idf.preFlashBootloaderAction": {
+					"type": "string",
+					"enum": [
+						"none"
+					],
+					"enumDescriptions": [
+						"Flash only (erase not applicable)"
+					],
+					"default": "none",
+					"description": "Action before Flash Bootloader"
+				},
+				"esp8266-idf.postFlashBootloaderAction": {
+					"type": "string",
+					"enum": [
+						"none",
+						"monitor"
+					],
+					"enumDescriptions": [
+						"Flash only",
+						"Auto open monitor after flash"
+					],
+					"default": "none",
+					"description": "Action after successful Flash Bootloader"
+				},
+				"esp8266-idf.preFlashPartitionAction": {
+					"type": "string",
+					"enum": [
+						"none"
+					],
+					"enumDescriptions": [
+						"Flash only (erase not applicable)"
+					],
+					"default": "none",
+					"description": "Action before Flash Partition Table"
+				},
+				"esp8266-idf.postFlashPartitionAction": {
+					"type": "string",
+					"enum": [
+						"none",
+						"monitor"
+					],
+					"enumDescriptions": [
+						"Flash only",
+						"Auto open monitor after flash"
+					],
+					"default": "none",
+					"description": "Action after successful Flash Partition Table"
+				},
+				"esp8266-idf.idfPath": {
+					"type": "string",
+					"default": "",
+					"description": "Path to ESP8266_RTOS_SDK"
+				},
+				"esp8266-idf.pythonPath": {
+					"type": "string",
+					"default": "",
+					"description": "Path to Python 3.7 installation folder (e.g. C:\\Python37-32). Leave empty to auto-detect."
+				},
+				"esp8266-idf.comPort": {
+					"type": "string",
+					"default": "",
+					"description": "COM port for flashing (e.g., COM3 or /dev/ttyUSB0)"
+				},
+				"esp8266-idf.overrideFlashConfig": {
+					"type": "boolean",
+					"default": false,
+					"description": "Use manual flash settings instead of menuconfig"
+				},
+				"esp8266-idf.flashBaud": {
+					"type": "number",
+					"default": 115200,
+					"description": "Flash baud rate"
+				},
+				"esp8266-idf.flashMode": {
+					"type": "string",
+					"default": "dio",
+					"enum": [
+						"dio",
+						"dout",
+						"qio",
+						"qout"
+					],
+					"description": "SPI Flash mode"
+				},
+				"esp8266-idf.flashFreq": {
+					"type": "string",
+					"default": "40m",
+					"enum": [
+						"40m",
+						"80m",
+						"20m",
+						"26m"
+					],
+					"description": "SPI Flash frequency"
+				},
+				"esp8266-idf.flashSize": {
+					"type": "string",
+					"default": "2MB",
+					"enum": [
+						"1MB",
+						"2MB",
+						"4MB",
+						"8MB",
+						"16MB"
+					],
+					"description": "SPI Flash size"
+				},
+				"esp8266-idf.useCompressedUpload": {
+					"type": "boolean",
+					"default": true,
+					"description": "Use compressed upload (-z)"
+				},
+				"esp8266-idf.beforeFlashing": {
+					"type": "string",
+					"enum": [
+						"default_reset",
+						"no_reset",
+						"no_reset_no_sync"
+					],
+					"default": "default_reset",
+					"description": "Chip reset mode before flash (esptool --before)"
+				},
+				"esp8266-idf.afterFlashing": {
+					"type": "string",
+					"enum": [
+						"hard_reset",
+						"no_reset"
+					],
+					"default": "hard_reset",
+					"description": "Chip reset mode after flash (esptool --after)"
+				},
+				"esp8266-idf.monitorBaud": {
+					"type": "number",
+					"default": 74880,
+					"description": "Monitor baud rate (passed via MONITORBAUD env variable)"
+				},
+				"esp8266-idf.shellPath": {
+					"type": "string",
+					"default": "",
+					"description": "Shell path (e.g. powershell.exe or /bin/bash). Leave empty for auto-detection."
+				},
+				"esp8266-idf.reuseTerminal": {
+					"type": "boolean",
+					"default": true,
+					"description": "Reuse existing terminal instead of creating a new one each time"
+				},
+				"esp8266-idf.useExecutionPolicyBypass": {
+					"type": "boolean",
+					"default": true,
+					"description": "On Windows, use -ExecutionPolicy Bypass for PowerShell"
+				},
+				"esp8266-idf.saveSettingsToWorkspace": {
+					"type": "boolean",
+					"default": true,
+					"description": "Save project-specific settings to workspace instead of global settings"
+				},
+				"esp8266-idf.autoGenerateOnOpen": {
+					"type": "boolean",
+					"default": true,
+					"description": "Automatically generate IntelliSense config and tasks.json on project open (only if files don't exist yet)"
+				},
+				"esp8266-idf.postBuildAnalysis": {
+					"type": "array",
+					"items": {
+						"type": "string",
+						"enum": [
+							"size",
+							"size-components",
+							"size-files"
+						]
+					},
+					"default": [],
+					"description": "Analysis commands to run automatically after a successful build"
+				},
+				"esp8266-idf.preFlashAction": {
+					"type": "string",
+					"enum": [
+						"none",
+						"erase"
+					],
+					"enumDescriptions": [
+						"Flash only",
+						"Erase entire flash before flashing (esptool --erase-all)"
+					],
+					"default": "none",
+					"description": "Action before flashing"
+				},
+				"esp8266-idf.postFlashFsAction": {
+					"type": "string",
+					"enum": [
+						"none",
+						"monitor"
+					],
+					"enumDescriptions": [
+						"Flash only",
+						"Auto open monitor after flash filesystem"
+					],
+					"default": "none",
+					"description": "Action after successful flash filesystem"
+				}
+			}
+		}
+	},
+	"devDependencies": {
+		"@vscode/vsce": "^3.9.1"
+	},
+	"__metadata": {
+		"installedTimestamp": 1780223878334,
+		"targetPlatform": "undefined",
+		"size": 879819
+	}
+}
