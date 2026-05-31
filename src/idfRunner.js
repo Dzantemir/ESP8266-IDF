@@ -66,7 +66,7 @@ async function checkEnvironment(silent = false) {
         const hasSdkconfig = fs.existsSync(path.join(projectRoot, 'sdkconfig'));
         if (!hasCmake && !hasSdkconfig) {
             warnings.push({
-                label: '⚠️ Not an ESP-IDF project',
+                label: '⚠️ Not an ESP8266-IDF project',
                 tooltip: 'No CMakeLists.txt or sdkconfig found in the project folder.\nClick to select a different project folder.',
                 command: 'esp.selectProject',
             });
@@ -81,7 +81,7 @@ async function checkEnvironment(silent = false) {
         const firstWarning = warnings[0];
         const label = firstWarning.label.replace('⚠️ ', '');
         const ans = await vscode.window.showErrorMessage(
-            `ESP-IDF: ${label}. See sidebar for details.`,
+            `ESP8266-IDF: ${label}. See sidebar for details.`,
             'Fix Now'
         );
         if (ans === 'Fix Now') {
@@ -204,8 +204,8 @@ async function checkToolsOrPrompt(idfPath, pythonCmd) {
 
                 const ans = await vscode.window.showErrorMessage(
                     missingList
-                        ? `⚠️ ESP-IDF: Build tools not found (${missingList}). Install them first?`
-                        : '⚠️ ESP-IDF: Build tools are not installed. Install them first?',
+                        ? `⚠️ ESP8266-IDF: Build tools not found (${missingList}). Install them first?`
+                        : '⚠️ ESP8266-IDF: Build tools are not installed. Install them first?',
                     'Install Now', 'Cancel'
                 );
 
@@ -243,10 +243,10 @@ async function checkToolsOrPrompt(idfPath, pythonCmd) {
                     watchCommandDone(markerFile, 'ESP › Install Tools').then(exitCode => {
                         if (exitCode === 0) {
                             setToolsVerified(true);
-                            vscode.window.showInformationMessage('✅ ESP-IDF tools installed! You can now run Build.');
+                            vscode.window.showInformationMessage('✅ ESP8266-IDF tools installed! You can now run Build.');
                         } else if (exitCode > 0) {
                             setToolsVerified(false);
-                            vscode.window.showErrorMessage(`ESP-IDF tools installation failed (exit code ${exitCode}). Check the terminal for details.`);
+                            vscode.window.showErrorMessage(`ESP8266-IDF tools installation failed (exit code ${exitCode}). Check the terminal for details.`);
                         } else {
                             setToolsVerified(false);
                             log('[Install Tools] Marker not found — install may not have completed');
@@ -294,8 +294,8 @@ async function checkAndInstallTools(silent = true) {
                     const match = combined.match(/ERROR:\s+The following required tools were not found:\s*(.+)/i);
                     const missingList = match ? match[1].trim() : '';
                     const msg = missingList
-                        ? `ESP-IDF: Required build tools not found (${missingList}). Install now?`
-                        : 'ESP-IDF: Required build tools are not installed. Install now?';
+                        ? `ESP8266-IDF: Required build tools not found (${missingList}). Install now?`
+                        : 'ESP8266-IDF: Required build tools are not installed. Install now?';
 
                     const ans = await vscode.window.showInformationMessage(msg, 'Install', 'Cancel');
                     if (ans === 'Install') {
@@ -320,10 +320,10 @@ async function checkAndInstallTools(silent = true) {
                         watchCommandDone(markerFile, 'ESP › Install Tools').then(exitCode => {
                             if (exitCode === 0) {
                                 setToolsVerified(true);
-                                vscode.window.showInformationMessage('✅ ESP-IDF tools installed successfully!');
+                                vscode.window.showInformationMessage('✅ ESP8266-IDF tools installed successfully!');
                             } else if (exitCode > 0) {
                                 setToolsVerified(false);
-                                vscode.window.showErrorMessage(`ESP-IDF tools installation failed (exit code ${exitCode}). Check the terminal for details.`);
+                                vscode.window.showErrorMessage(`ESP8266-IDF tools installation failed (exit code ${exitCode}). Check the terminal for details.`);
                             } else {
                                 setToolsVerified(false);
                             }
@@ -341,7 +341,7 @@ async function checkAndInstallTools(silent = true) {
                             async (depErr) => {
                                 if (depErr) {
                                     const ans = await vscode.window.showWarningMessage(
-                                        'ESP-IDF: Python requirements not satisfied. Install now?',
+                                        'ESP8266-IDF: Python requirements not satisfied. Install now?',
                                         'Install', 'Skip'
                                     );
                                     if (ans === 'Install') {

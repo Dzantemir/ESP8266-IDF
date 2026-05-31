@@ -107,7 +107,7 @@ async function cmdSelectPort() {
         { label: '$(edit) Enter manually...', description: '' },
     ];
     const picked = await vscode.window.showQuickPick(items, {
-        title: `ESP-IDF Tools › Select Port[${modeHint}]`,
+        title: `ESP8266-IDF Tools › Select Port[${modeHint}]`,
         placeHolder: IS_WIN ? 'COM3, COM4...' : '/dev/ttyUSB0, /dev/ttyACM0...',
     });
     if (!picked) return null;

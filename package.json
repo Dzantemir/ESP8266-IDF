@@ -2,7 +2,7 @@
 	"name": "esp8266-idf",
 	"displayName": "ESP8266-IDF",
 	"description": "Build, flash, monitor and configure ESP8266-series projects (ESP8266, ESP8285) using ESP8266_RTOS_SDK (idf.py). Supports Windows, Linux and macOS.",
-	"version": "1.83.0",
+	"version": "1.83.1",
 	"publisher": "Dzantemir",
 	"author": "Dzantemir",
 	"license": "MIT",
@@ -78,7 +78,7 @@
 			"activitybar": [
 				{
 					"id": "esp8266-idf-explorer",
-					"title": "ESP-IDF",
+					"title": "ESP8266-IDF",
 					"icon": "media/icon_mono.svg"
 				}
 			]
@@ -489,7 +489,7 @@
 			}
 		],
 		"configuration": {
-			"title": "ESP-IDF Tools",
+			"title": "ESP8266-IDF Tools",
 			"properties": {
 				"esp8266-idf.postBuildAction": {
 					"type": "string",
@@ -847,8 +847,8 @@
 		"@vscode/vsce": "^3.9.1"
 	},
 	"__metadata": {
-		"installedTimestamp": 1780223878334,
+		"installedTimestamp": 1780229118035,
 		"targetPlatform": "undefined",
-		"size": 879819
+		"size": 879931
 	}
 }

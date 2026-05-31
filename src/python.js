@@ -244,7 +244,7 @@ async function checkPythonDeps(idfPath, pythonCmd) {
             async (depErr) => {
                 if (!depErr) { resolve(true); return; }
                 const ans = await vscode.window.showWarningMessage(
-                    'ESP-IDF: Python requirements not satisfied. Install now?',
+                    'ESP8266-IDF: Python requirements not satisfied. Install now?',
                     'Install', 'Skip'
                 );
                 if (ans === 'Install') {
@@ -284,7 +284,7 @@ async function cmdSetPythonPath() {
     ];
 
     const picked = await vscode.window.showQuickPick(items, {
-        title: 'ESP-IDF Tools › Python 3.7 Path',
+        title: 'ESP8266-IDF Tools › Python 3.7 Path',
         placeHolder: current ? `Manual: ${current}` : 'Currently: auto-detect',
         ignoreFocusOut: true,
     });

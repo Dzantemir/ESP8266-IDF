@@ -138,7 +138,7 @@ function q(p) {
 // ─── Logging ─────────────────────────────────────────────────────────────────
 function log(msg) {
     if (!outputChannel) {
-        outputChannel = vscode.window.createOutputChannel('ESP-IDF Tools');
+        outputChannel = vscode.window.createOutputChannel('ESP8266-IDF Tools');
     }
     outputChannel.appendLine(`[${new Date().toLocaleTimeString()}] ${msg}`);
 }

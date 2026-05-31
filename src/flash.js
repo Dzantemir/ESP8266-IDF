@@ -71,7 +71,7 @@ async function runIdf(args, termName, isBuildCommand = false, extraEnvVars = {},
     }
 
     if (!fs.existsSync(path.join(root, 'CMakeLists.txt')) && !fs.existsSync(path.join(root, 'sdkconfig'))) {
-        vscode.window.showErrorMessage('ESP: No CMakeLists.txt or sdkconfig found. Is this an ESP-IDF project?');
+        vscode.window.showErrorMessage('ESP: No CMakeLists.txt or sdkconfig found. Is this an ESP8266-IDF project?');
         return;
     }
 
