@@ -51,11 +51,17 @@ function parseCmakeComponentRegister(content) {
     // This captures if()/set()/endif() blocks, comments, and any other CMake logic.
     // Use the ORIGINAL (non-cleaned) content to preserve comments verbatim.
     // normalised holds the original content with CRLF→LF; 'text' (below) is the comment-stripped version.
-    const originalStartIdx = normalised.search(/idf_component_register\s*\(/);
+    // If the preamble is ONLY comments and whitespace, skip it — such comments are
+    // specific to the original file layout and become stale/misleading when regenerated.
+    //
+    // IMPORTANT: We must find idf_component_register() in the ORIGINAL text at the
+    // SAME position as in the cleaned text — otherwise a commented-out
+    // idf_component_register() inside a # comment would be matched incorrectly.
+    const originalStartIdx = _mapCleanedPosToOriginal(lines, cleaned, startIdx);
     if (originalStartIdx > 0) {
         const preambleRaw = normalised.substring(0, originalStartIdx);
-        // Only keep non-empty preamble (skip if it's just whitespace/newlines)
-        if (preambleRaw.trim().length > 0) {
+        // Only keep non-empty preamble that contains actual CMake code (not just comments)
+        if (preambleRaw.trim().length > 0 && !_isOnlyComments(preambleRaw)) {
             result.preambleBlock = preambleRaw.trimEnd() + '\n\n';
         }
     }
@@ -110,9 +116,67 @@ function parseCmakeComponentRegister(content) {
         _pushToResult(result, currentKw, val);
     }
 
+    // Variant C: Resolve preamble variables for SRCS
+    const { vars: preambleVars, conditionalVars: preambleConditionalVars } = _resolvePreambleVars(result.preambleBlock);
+
+    // Check if any SRCS value is a variable reference
+    for (let i = 0; i < result.srcs.length; i++) {
+        const src = result.srcs[i];
+        const varMatch = src.match(/^\$\{(\w+)\}$/);
+        if (varMatch) {
+            const varName = varMatch[1];
+            result.srcVarName = varName;
+            result.srcsOriginalRef = src;
+
+            // Replace the ${varName} entry with expanded values
+            result.srcs.splice(i, 1); // remove "${srcs}"
+
+            // Add non-conditional values
+            if (preambleVars[varName]) {
+                result.srcVarValues = [...preambleVars[varName]];
+                result.srcs.push(...preambleVars[varName]);
+            }
+
+            // Add conditional values
+            if (preambleConditionalVars[varName]) {
+                result.conditionalSrcs = [...preambleConditionalVars[varName]];
+                for (const cond of preambleConditionalVars[varName]) {
+                    result.srcs.push(cond.file);
+                }
+            }
+
+            break;
+        }
+    }
+
     // #50: Detect variable references (${...}) in REQUIRES/PRIV_REQUIRES
     // Mark them so the UI can warn the user and handle them specially.
     result.hasVariableRefs = _detectVariableRefs(result);
+
+    // #50: Extract postamble (code after idf_component_register() closing paren)
+    // Use originalStartIdx (already mapped from cleaned text) instead of
+    // re-searching the original text, to avoid matching commented-out calls.
+    if (originalStartIdx >= 0) {
+        let origDepth = 0;
+        let origEndIdx = -1;
+        for (let i = originalStartIdx; i < normalised.length; i++) {
+            if (normalised[i] === '(') origDepth++;
+            if (normalised[i] === ')') {
+                origDepth--;
+                if (origDepth === 0) {
+                    origEndIdx = i;
+                    break;
+                }
+            }
+        }
+        if (origEndIdx !== -1) {
+            const afterRegister = normalised.substring(origEndIdx + 1);
+            // Skip postamble if it's only comments and whitespace
+            if (afterRegister.trim().length > 0 && !_isOnlyComments(afterRegister)) {
+                result.postambleBlock = '\n' + afterRegister.trim() + '\n';
+            }
+        }
+    }
 
     result.cmakeFormat = 'modern';
     return result;
@@ -135,8 +199,9 @@ function parseCmakeLegacyRegister(content) {
 
     const normalised = content.replace(/\r\n/g, '\n');
 
-    // Check if register_component() exists
-    if (!/register_component\s*\(/.test(normalised)) {
+    // Check if register_component() exists (in comment-stripped text)
+    const legacyCleaned = normalised.split('\n').map(l => _stripComment(l)).join('\n');
+    if (!/register_component\s*\(/.test(legacyCleaned)) {
         // No register_component() found either — return default empty result
         // but still mark as legacy since idf_component_register wasn't found
         return result;
@@ -166,20 +231,57 @@ function parseCmakeLegacyRegister(content) {
         }
     }
 
-    // #50: For legacy format, capture any CMake code that is NOT a set(COMPONENT_*) line
-    // and is NOT register_component(). This preserves if()/endif() blocks, etc.
+    // #50: For legacy format, capture CMake code BEFORE register_component() as preamble,
+    // and code AFTER register_component() as postamble.
     const legacyPreambleLines = [];
     const legacySetRe = /^set\s*\(\s*COMPONENT_\w+\s/i;
     const legacyRegisterRe = /^register_component\s*\(/i;
-    for (const line of normalised.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed) continue; // skip blank lines (we'll re-add spacing)
+
+    // Find the line index of register_component() — skip commented lines
+    const lines = normalised.split('\n');
+    let registerLineIdx = -1;
+    for (let i = 0; i < lines.length; i++) {
+        const cleanedLine = _stripComment(lines[i]).trim();
+        if (legacyRegisterRe.test(cleanedLine)) {
+            registerLineIdx = i;
+            break;
+        }
+    }
+
+    // Collect preamble lines (BEFORE register_component)
+    for (let i = 0; i < lines.length; i++) {
+        const trimmed = lines[i].trim();
+        if (!trimmed) continue; // skip blank lines
+        if (i >= registerLineIdx && registerLineIdx !== -1) break; // stop at register_component
         if (legacySetRe.test(trimmed)) continue;
         if (legacyRegisterRe.test(trimmed)) continue;
-        legacyPreambleLines.push(line);
+        legacyPreambleLines.push(lines[i]);
     }
     if (legacyPreambleLines.length > 0) {
-        result.preambleBlock = legacyPreambleLines.join('\n').trimEnd() + '\n\n';
+        const legacyPreambleText = legacyPreambleLines.join('\n');
+        // Skip preamble if it's only comments and whitespace
+        if (!_isOnlyComments(legacyPreambleText)) {
+            result.preambleBlock = legacyPreambleText.trimEnd() + '\n\n';
+        }
+    }
+
+    // Collect postamble lines (AFTER register_component())
+    if (registerLineIdx !== -1) {
+        // Find register_component() in the comment-stripped text, then map back
+        const regCompMatch = legacyCleaned.match(/register_component\s*\(\s*\)/);
+        if (regCompMatch) {
+            // Map the position from cleaned to original text
+            const origLines = normalised.split('\n');
+            const origCleaned = origLines.map(l => _stripComment(l));
+            const origRegCompIdx = _mapCleanedPosToOriginal(origLines, origCleaned, regCompMatch.index);
+            if (origRegCompIdx >= 0) {
+                const afterRegComp = normalised.substring(origRegCompIdx + regCompMatch[0].length);
+                // Skip postamble if it's only comments and whitespace
+                if (afterRegComp.trim().length > 0 && !_isOnlyComments(afterRegComp)) {
+                    result.postambleBlock = '\n' + afterRegComp.trim() + '\n';
+                }
+            }
+        }
     }
 
     // #50: Detect variable references
@@ -201,6 +303,11 @@ function parseCmakeRoot(content) {
         projectName: '',
         excludeComponents: [],
         extraComponentDirs: [],
+        components: [],              // set(COMPONENTS ...) — whitelist
+        sdkconfig: '',               // set(SDKCONFIG ...) — single file path
+        sdkconfigDefaults: [],        // set(SDKCONFIG_DEFAULTS ...) — list of file paths
+        ccacheEnable: false,          // set(CCACHE_ENABLE 1)
+        rootPreambleBlock: '',        // code between include() and project() — preserved verbatim
         partitionBinLinksBlock: '',   // preserved verbatim (legacy)
         postambleBlock: '',          // ALL content after project() — preserved verbatim
     };
@@ -261,6 +368,46 @@ function parseCmakeRoot(content) {
 
     // Extract EXTRA_COMPONENT_DIRS from set() command
     result.extraComponentDirs = _extractSetValues(normalised, 'EXTRA_COMPONENT_DIRS');
+
+    // Extract COMPONENTS from set() command (whitelist)
+    result.components = _extractSetValues(normalised, 'COMPONENTS');
+
+    // Extract SDKCONFIG (single value)
+    const sdkconfigVals = _extractSetValues(normalised, 'SDKCONFIG');
+    result.sdkconfig = sdkconfigVals.length > 0 ? sdkconfigVals[0] : '';
+
+    // Extract SDKCONFIG_DEFAULTS
+    result.sdkconfigDefaults = _extractSetValues(normalised, 'SDKCONFIG_DEFAULTS');
+
+    // Extract CCACHE_ENABLE
+    const ccacheVals = _extractSetValues(normalised, 'CCACHE_ENABLE');
+    result.ccacheEnable = ccacheVals.length > 0 && (ccacheVals[0] === '1' || ccacheVals[0].toLowerCase() === 'on' || ccacheVals[0].toLowerCase() === 'true');
+
+    // Extract root preamble (code between include() and project() that isn't a known set() command)
+    if (projMatch) {
+        const includeMatch = normalised.match(/include\s*\(\s*\$ENV\{IDF_PATH\}[\s\S]*?\)/);
+        if (includeMatch) {
+            const includeEnd = includeMatch.index + includeMatch[0].length;
+            const projectStart = projMatch.index;
+            const betweenText = normalised.substring(includeEnd, projectStart);
+
+            // Remove the known set() commands from betweenText to get the custom preamble
+            let customPreamble = betweenText;
+            customPreamble = customPreamble.replace(/set\s*\(\s*COMPONENTS\s+[\s\S]*?\)\s*/gi, '');
+            customPreamble = customPreamble.replace(/set\s*\(\s*EXCLUDE_COMPONENTS\s+[\s\S]*?\)\s*/gi, '');
+            customPreamble = customPreamble.replace(/set\s*\(\s*EXTRA_COMPONENT_DIRS\s+[\s\S]*?\)\s*/gi, '');
+            customPreamble = customPreamble.replace(/set\s*\(\s*SDKCONFIG\s+[\s\S]*?\)\s*/gi, '');
+            customPreamble = customPreamble.replace(/set\s*\(\s*SDKCONFIG_DEFAULTS\s+[\s\S]*?\)\s*/gi, '');
+            customPreamble = customPreamble.replace(/set\s*\(\s*CCACHE_ENABLE\s+[\s\S]*?\)\s*/gi, '');
+            // Remove cmake_minimum_required and include lines (already auto-generated)
+            customPreamble = customPreamble.replace(/cmake_minimum_required\s*\([\s\S]*?\)\s*/gi, '');
+            customPreamble = customPreamble.replace(/include\s*\([\s\S]*?\)\s*/gi, '');
+
+            if (customPreamble.trim().length > 0) {
+                result.rootPreambleBlock = customPreamble.trimEnd() + '\n';
+            }
+        }
+    }
 
     return result;
 }
@@ -337,15 +484,33 @@ function generateCmakeComponentRegister(parsed) {
     const parts = [];
     const mode = parsed.sourceMode || 'srcs';
 
-    // #50: Prepend preamble block (if()/set()/endif() and other CMake logic before idf_component_register)
+    // Variant C / #50: Prepend preamble block
     let preamble = '';
     if (parsed.preambleBlock && parsed.preambleBlock.trim().length > 0) {
-        preamble = parsed.preambleBlock.trimEnd() + '\n\n';
+        let preambleText = parsed.preambleBlock.trimEnd();
+        // If flattening (srcVarName + srcsModified), strip set()/list(APPEND) for the variable
+        if (parsed.srcVarName && parsed.srcsModified) {
+            const varName = parsed.srcVarName;
+            const escapedVarName = varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            // Remove set(varName ...)
+            preambleText = preambleText.replace(new RegExp('set\\s*\\(\\s*' + escapedVarName + '\\s+[\\s\\S]*?\\)', 'g'), '');
+            // Remove if()/endif() blocks containing list(APPEND varName ...)
+            preambleText = preambleText.replace(new RegExp('if\\s*\\([^)]*\\)[\\s\\S]*?list\\s*\\(\\s*APPEND\\s+' + escapedVarName + '\\s+[\\s\\S]*?endif\\s*\\(\\s*\\)', 'g'), '');
+            preambleText = preambleText.replace(/\n{3,}/g, '\n\n').trim();
+        }
+        if (preambleText.trim().length > 0) {
+            preamble = preambleText.trimEnd() + '\n\n';
+        }
     }
 
-    // SRCS (always quoted) — only in SRCS mode
+    // Variant C: SRCS line — preserve variable reference or flatten
     if (mode === 'srcs' && parsed.srcs && parsed.srcs.length > 0) {
-        parts.push('    SRCS ' + parsed.srcs.map(s => _quoteIfNeeded(s, true)).join(' '));
+        if (parsed.srcVarName && !parsed.srcsModified) {
+            // Preserve original variable reference
+            parts.push('    SRCS ${' + parsed.srcVarName + '}');
+        } else {
+            parts.push('    SRCS ' + parsed.srcs.map(s => _quoteIfNeeded(s, true)).join(' '));
+        }
     }
 
     // SRC_DIRS — only in srcDirs mode
@@ -393,11 +558,26 @@ function generateCmakeComponentRegister(parsed) {
         parts.push('    EMBED_TXTFILES ' + parsed.embedTxtFiles.map(s => _quoteIfNeeded(s, true)).join(' '));
     }
 
-    if (parts.length === 0) {
-        return preamble + 'idf_component_register()\n';
+    // REQUIRED_IDF_TARGETS
+    if (parsed.requiredIdfTargets && parsed.requiredIdfTargets.length > 0) {
+        parts.push('    REQUIRED_IDF_TARGETS ' + parsed.requiredIdfTargets.join(' '));
     }
 
-    return preamble + 'idf_component_register(\n' + parts.join('\n') + '\n)\n';
+    if (parts.length === 0) {
+        let output = preamble + 'idf_component_register()\n';
+        // Append postamble
+        if (parsed.postambleBlock && parsed.postambleBlock.trim().length > 0) {
+            output += '\n' + parsed.postambleBlock.trim() + '\n';
+        }
+        return output;
+    }
+
+    let output = preamble + 'idf_component_register(\n' + parts.join('\n') + '\n)\n';
+    // Append postamble
+    if (parsed.postambleBlock && parsed.postambleBlock.trim().length > 0) {
+        output += '\n' + parsed.postambleBlock.trim() + '\n';
+    }
+    return output;
 }
 
 /**
@@ -471,6 +651,11 @@ function generateCmakeLegacyRegister(parsed) {
     // Always end with register_component()
     out += '\nregister_component()\n';
 
+    // Append postamble (code after register_component())
+    if (parsed.postambleBlock && parsed.postambleBlock.trim().length > 0) {
+        out += '\n' + parsed.postambleBlock.trim() + '\n';
+    }
+
     return out;
 }
 
@@ -487,12 +672,37 @@ function generateCmakeRoot(parsed) {
     out += 'cmake_minimum_required(VERSION 3.5)\n\n';
     out += 'include($ENV{IDF_PATH}/tools/cmake/project.cmake)\n';
 
+    // set(COMPONENTS ...) — whitelist
+    if (parsed.components && parsed.components.length > 0) {
+        out += 'set(COMPONENTS ' + parsed.components.join(' ') + ')\n';
+    }
+
     if (parsed.excludeComponents && parsed.excludeComponents.length > 0) {
         out += 'set(EXCLUDE_COMPONENTS ' + parsed.excludeComponents.join(' ') + ')\n';
     }
 
     if (parsed.extraComponentDirs && parsed.extraComponentDirs.length > 0) {
         out += 'set(EXTRA_COMPONENT_DIRS ' + parsed.extraComponentDirs.map(d => _quoteIfNeeded(d)).join(' ') + ')\n';
+    }
+
+    // set(SDKCONFIG ...) — single file path
+    if (parsed.sdkconfig && parsed.sdkconfig.trim()) {
+        out += 'set(SDKCONFIG ' + _quoteIfNeeded(parsed.sdkconfig.trim()) + ')\n';
+    }
+
+    // set(SDKCONFIG_DEFAULTS ...) — list of file paths
+    if (parsed.sdkconfigDefaults && parsed.sdkconfigDefaults.length > 0) {
+        out += 'set(SDKCONFIG_DEFAULTS ' + parsed.sdkconfigDefaults.map(d => _quoteIfNeeded(d)).join(' ') + ')\n';
+    }
+
+    // set(CCACHE_ENABLE 1)
+    if (parsed.ccacheEnable) {
+        out += 'set(CCACHE_ENABLE 1)\n';
+    }
+
+    // Root preamble (custom code before project)
+    if (parsed.rootPreambleBlock && parsed.rootPreambleBlock.trim().length > 0) {
+        out += parsed.rootPreambleBlock.trimEnd() + '\n';
     }
 
     out += 'project(' + (parsed.projectName || 'my_project') + ')\n';
@@ -677,6 +887,7 @@ function _openCmakeEditor(cmakePath, componentName, root, componentDir, isRoot) 
                 const filters = {};
                 const field = msg.target || msg.field || '';
                 const fieldUpper = field.toUpperCase();
+                let canSelectMany = true;  // default: allow multiple selection
                 if (fieldUpper === 'SRCS' || field === 'srcs' || fieldUpper === 'EXCLUDE_SRCS' || field === 'excludeSrcs') {
                     filters['Source files'] = ['c', 'cpp', 'cc', 'cxx', 'S', 's'];
                     filters['All files'] = ['*'];
@@ -689,6 +900,13 @@ function _openCmakeEditor(cmakePath, componentName, root, componentDir, isRoot) 
                 } else if (fieldUpper === 'EMBED_TXTFILES' || field === 'embedTxtFiles') {
                     filters['Text files'] = ['html', 'htm', 'txt', 'json', 'xml', 'css', 'js'];
                     filters['All files'] = ['*'];
+                } else if (field === 'sdkconfig') {
+                    filters['Config files'] = ['sdkconfig', 'config'];
+                    filters['All files'] = ['*'];
+                    canSelectMany = false;  // single file only
+                } else if (field === 'sdkconfigDefaults') {
+                    filters['Config files'] = ['sdkconfig', 'config', 'defaults'];
+                    filters['All files'] = ['*'];
                 } else {
                     filters['All files'] = ['*'];
                 }
@@ -696,7 +914,7 @@ function _openCmakeEditor(cmakePath, componentName, root, componentDir, isRoot) 
                 const uris = await vscode.window.showOpenDialog({
                     canSelectFiles: true,
                     canSelectFolders: false,
-                    canSelectMany: true,
+                    canSelectMany: canSelectMany,
                     defaultUri: vscode.Uri.file(componentDir),
                     filters,
                     title: `Select files for ${field}`,
@@ -943,10 +1161,17 @@ function _emptyComponentParsed() {
         ldfragments: [],
         requires: [],
         privRequires: [],
+        requiredIdfTargets: [],   // REQUIRED_IDF_TARGETS values
         embedFiles: [],
         embedTxtFiles: [],    // Match HTML template naming (uppercase F)
         preambleBlock: '',    // #50: CMake code before idf_component_register() — preserved verbatim
+        postambleBlock: '',   // CMake code after idf_component_register() / register_component() — preserved verbatim
         hasVariableRefs: false, // #50: true if ${...} refs found in REQUIRES/PRIV_REQUIRES
+        srcVarName: null,         // Variant C: variable name (e.g. "srcs") if SRCS uses a variable
+        srcVarValues: [],         // Variant C: non-conditional files resolved from the variable
+        conditionalSrcs: [],      // Variant C: [{file, condition}] for files inside if/endif blocks
+        srcsOriginalRef: null,    // Variant C: original reference string (e.g. "${srcs}")
+        srcsModified: false,      // Variant C: tracks if user changed SRCS in the UI
     };
 }
 
@@ -960,7 +1185,7 @@ function _pushToResult(result, keyword, value) {
         case 'LDFRAGMENTS':      result.ldfragments.push(value); break;
         case 'REQUIRES':         result.requires.push(value); break;
         case 'PRIV_REQUIRES':    result.privRequires.push(value); break;
-        case 'REQUIRED_IDF_TARGETS': break; // skip in UI
+        case 'REQUIRED_IDF_TARGETS': result.requiredIdfTargets.push(value); break;
         case 'EMBED_FILES':      result.embedFiles.push(value); break;
         case 'EMBED_TXTFILES':   result.embedTxtFiles.push(value); break;
     }
@@ -1012,6 +1237,41 @@ function _tokeniseCmakeArgs(text) {
 }
 
 /**
+ * Map a position in the comment-stripped (cleaned) text back to the
+ * corresponding position in the original text.
+ *
+ * Since _stripComment only removes content AFTER '#' on each line,
+ * the column position within a matching line is the same in both texts.
+ * We just need to find which line the cleaned position falls on,
+ * then calculate the original offset by summing original line lengths.
+ *
+ * @param {string[]} origLines   Original lines (from normalised.split('\n'))
+ * @param {string[]} cleanLines  Comment-stripped lines (same length as origLines)
+ * @param {number}   cleanPos    Position in the cleaned text
+ * @returns {number} Corresponding position in the original text, or -1 if not found
+ */
+function _mapCleanedPosToOriginal(origLines, cleanLines, cleanPos) {
+    let cumulClean = 0;
+    let cumulOrig = 0;
+    for (let i = 0; i < cleanLines.length; i++) {
+        const cLine = cleanLines[i];
+        const oLine = origLines[i];
+        // +1 for the newline character that was used in join('\n')
+        const cLineLen = cLine.length + 1;
+        const oLineLen = oLine.length + 1;
+
+        if (cleanPos >= cumulClean && cleanPos < cumulClean + cLineLen) {
+            // The target position falls within this line
+            const colOffset = cleanPos - cumulClean;
+            return cumulOrig + colOffset;
+        }
+        cumulClean += cLineLen;
+        cumulOrig += oLineLen;
+    }
+    return -1;
+}
+
+/**
  * Strip comment from a line, respecting quoted strings.
  */
 function _stripComment(line) {
@@ -1025,6 +1285,27 @@ function _stripComment(line) {
         }
     }
     return line;
+}
+
+/**
+ * Check if a block of text contains only comment lines and whitespace,
+ * with no actual CMake code (set(), if(), etc.).
+ * Used to avoid preserving pure-comment preambles/postambles that would
+ * become stale or misleading when the file is regenerated.
+ *
+ * @param {string} text  The text to check.
+ * @returns {boolean} True if the text contains only comments and whitespace.
+ */
+function _isOnlyComments(text) {
+    if (!text || !text.trim()) return true;
+    const lines = text.split('\n');
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;           // blank line — ok
+        if (trimmed.startsWith('#')) continue; // comment line — ok
+        return false;                      // actual code found
+    }
+    return true;
 }
 
 /**
@@ -1112,6 +1393,80 @@ function _detectVariableRefs(result) {
         }
     }
     return false;
+}
+
+/**
+ * Variant C: Parse preamble block for set(varName ...) and list(APPEND varName ...)
+ * inside if()/endif() blocks.
+ *
+ * @param {string} preambleBlock  The preamble text before idf_component_register().
+ * @returns {{ vars: object, conditionalVars: object }}
+ *   vars: varName -> [values]
+ *   conditionalVars: varName -> [{file, condition}]
+ */
+function _resolvePreambleVars(preambleBlock) {
+    const vars = {};  // varName -> [values]
+    const conditionalVars = {};  // varName -> [{file, condition}]
+
+    if (!preambleBlock) return { vars, conditionalVars };
+
+    const normalised = preambleBlock.replace(/\r\n/g, '\n');
+
+    // Parse set(varName val1 val2 ...)
+    // Handle multi-line set() with quoted values
+    const setRegex = /set\s*\(\s*(\w+)\s+([\s\S]*?)\)/g;
+    let match;
+    while ((match = setRegex.exec(normalised)) !== null) {
+        const varName = match[1];
+        // Only lowercase variable names (convention for local vars like `srcs`)
+        if (varName !== varName.toLowerCase()) continue;
+        const valuesStr = match[2];
+        const values = _tokeniseCmakeArgs(valuesStr).map(a => a.replace(/^"|"$/g, '')).filter(Boolean);
+        vars[varName] = values;
+    }
+
+    // Parse list(APPEND varName val1 val2 ...) inside if()/endif() blocks
+    const ifBlockRegex = /if\s*\(([\s\S]*?)\)\s*([\s\S]*?)endif\s*\(\s*\)/g;
+    while ((match = ifBlockRegex.exec(normalised)) !== null) {
+        const condition = match[1].trim();
+        const body = match[2];
+        const listRegex = /list\s*\(\s*APPEND\s+(\w+)\s+([\s\S]*?)\)/g;
+        let listMatch;
+        while ((listMatch = listRegex.exec(body)) !== null) {
+            const varName = listMatch[1];
+            const valuesStr = listMatch[2];
+            const values = _tokeniseCmakeArgs(valuesStr).map(a => a.replace(/^"|"$/g, '')).filter(Boolean);
+            if (!conditionalVars[varName]) conditionalVars[varName] = [];
+            for (const v of values) {
+                conditionalVars[varName].push({ file: v, condition: condition });
+            }
+        }
+    }
+
+    // Also handle unconditional list(APPEND varName ...) outside if/endif blocks
+    const globalListRegex = /list\s*\(\s*APPEND\s+(\w+)\s+([\s\S]*?)\)/g;
+    while ((match = globalListRegex.exec(normalised)) !== null) {
+        const varName = match[1];
+        // Check if this occurrence is inside an if/endif block
+        const matchStart = match.index;
+        let insideIf = false;
+        const ifCheckRegex = /if\s*\([\s\S]*?\)[\s\S]*?endif\s*\(\s*\)/g;
+        let ifMatch;
+        while ((ifMatch = ifCheckRegex.exec(normalised)) !== null) {
+            if (matchStart >= ifMatch.index && matchStart < ifMatch.index + ifMatch[0].length) {
+                insideIf = true;
+                break;
+            }
+        }
+        if (insideIf) continue; // already handled by conditional vars
+
+        const valuesStr = match[2];
+        const values = _tokeniseCmakeArgs(valuesStr).map(a => a.replace(/^"|"$/g, '')).filter(Boolean);
+        if (!vars[varName]) vars[varName] = [];
+        vars[varName].push(...values);
+    }
+
+    return { vars, conditionalVars };
 }
 
 /**

@@ -551,6 +551,20 @@
     color: #e8a020;
   }
 
+  /* ── Conditional Source Tag ─────────────────────────────────── */
+  .tag.conditional {
+    border-left: 3px solid var(--warn);
+  }
+  .tag .cond-badge {
+    font-size: 9px;
+    padding: 0 3px;
+    border-radius: 2px;
+    background: rgba(204, 167, 0, 0.2);
+    color: #e8a020;
+    margin-left: 2px;
+    white-space: nowrap;
+  }
+
   /* ── Preamble Editor ──────────────────────────────────────────── */
   .preamble-editor {
     width: 100%;
@@ -594,6 +608,70 @@
   .var-ref-warning .warn-icon {
     flex-shrink: 0;
   }
+
+  /* ── CCache Section ──────────────────────────────────────────── */
+  .ccache-toggle {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 0;
+  }
+  .ccache-toggle input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--accent);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .ccache-toggle-label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    cursor: pointer;
+  }
+  .ccache-toggle-label .primary-text {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--fg);
+  }
+  .ccache-toggle-label .secondary-text {
+    font-size: 11px;
+    color: var(--fg2);
+    font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+  }
+  .ccache-platform-info {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 1.6;
+  }
+  .ccache-platform-info.win {
+    background: rgba(78, 201, 176, 0.08);
+    border: 1px solid rgba(78, 201, 176, 0.25);
+    color: var(--ok);
+  }
+  .ccache-platform-info.other {
+    background: rgba(204, 167, 0, 0.08);
+    border: 1px solid rgba(204, 167, 0, 0.25);
+    color: var(--warn);
+  }
+  .ccache-platform-info .platform-icon {
+    margin-right: 4px;
+  }
+  .ccache-platform-info a {
+    color: var(--accent2);
+    text-decoration: none;
+  }
+  .ccache-platform-info a:hover {
+    text-decoration: underline;
+  }
+  .ccache-desc {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--fg2);
+    line-height: 1.5;
+  }
 </style>
 </head>
 <body>
@@ -616,6 +694,7 @@
         <option value="modern">Modern (idf_component_register)</option>
       </select>
     </span>
+    <button class="icon-btn" id="refreshBtn" onclick="refreshFromDisk()" title="Reload from disk (discard unsaved changes)">&#x21BB; Refresh</button>
     <button class="primary" id="saveBtn" onclick="save()">&#128190; Save</button>
   </div>
 </div>
@@ -728,20 +807,34 @@ function getDefaultComponentData() {
     privIncludeDirs: [],
     requires: [],
     privRequires: [],
+    requiredIdfTargets: [],
+    // Note: REQUIRED_IDF_TARGETS is hidden from UI since this extension is ESP8266-only
+    // The field is kept in formData so existing files with it parse correctly
     embedFiles: [],
     embedTxtFiles: [],
     ldfragments: [],
     cmakeFormat: cmakeFormat,
     preambleBlock: '',
-    hasVariableRefs: false
+    postambleBlock: '',
+    hasVariableRefs: false,
+    srcVarName: null,
+    srcVarValues: [],
+    conditionalSrcs: [],
+    srcsOriginalRef: null,
+    srcsModified: false
   };
 }
 
 function getDefaultRootData() {
   return {
     projectName: '',
+    components: [],
     excludeComponents: [],
     extraComponentDirs: [],
+    sdkconfig: '',
+    sdkconfigDefaults: [],
+    ccacheEnable: false,
+    rootPreambleBlock: '',
     postambleBlock: '',
     partitionBinLinksBlock: ''
   };
@@ -765,17 +858,35 @@ function renderForm() {
   }
   bindEvents();
   restoreSections();
-  // Collapse preamble section by default
+  // Collapse preamble section only if empty
   const preambleSection = document.getElementById('section_preamble');
-  if (preambleSection && !collapsedSections.has('preamble')) {
+  if (preambleSection && !collapsedSections.has('preamble') && !(formData.preambleBlock && formData.preambleBlock.trim())) {
     preambleSection.classList.add('collapsed');
     collapsedSections.add('preamble');
+  }
+  // Collapse root preamble section only if empty (root editor)
+  const rootPreambleSection = document.getElementById('section_rootPreamble');
+  if (rootPreambleSection && !collapsedSections.has('rootPreamble') && !(formData.rootPreambleBlock && formData.rootPreambleBlock.trim())) {
+    rootPreambleSection.classList.add('collapsed');
+    collapsedSections.add('rootPreamble');
   }
   // Collapse postamble section by default (only for root)
   const postambleSection = document.getElementById('section_postamble');
   if (postambleSection && !collapsedSections.has('postamble')) {
     postambleSection.classList.add('collapsed');
     collapsedSections.add('postamble');
+  }
+  // Collapse component postamble section only if empty (component editor)
+  const compPostambleSection = document.getElementById('section_compPostamble');
+  if (compPostambleSection && !collapsedSections.has('compPostamble') && !(formData.postambleBlock && formData.postambleBlock.trim())) {
+    compPostambleSection.classList.add('collapsed');
+    collapsedSections.add('compPostamble');
+  }
+  // Collapse ccache section if disabled (root editor)
+  const ccacheSection = document.getElementById('section_ccache');
+  if (ccacheSection && !collapsedSections.has('ccache') && !formData.ccacheEnable) {
+    ccacheSection.classList.add('collapsed');
+    collapsedSections.add('ccache');
   }
 }
 
@@ -790,6 +901,60 @@ function renderRootForm() {
                oninput="formData.projectName=this.value;setDirty();updatePreview()">
       </div>
     </div>
+
+    ${section('rootPreamble', '&#x1F4DD;', 'Custom CMake Code (before project)' + (formData.rootPreambleBlock && formData.rootPreambleBlock.trim() ? '' : ' <span style="font-weight:400;color:var(--fg2);font-size:11px">(empty)</span>'), `
+      <div class="sub-label">CMake code between include() and project() — not covered by fields below:</div>
+      <textarea class="preamble-editor" id="rootPreambleEditor"
+                placeholder="# e.g.&#10;# Custom CMake code before project()&#10;set(MY_CUSTOM_VAR &quot;value&quot;)"
+                oninput="updateRootPreamble(this.value)">${esc(formData.rootPreambleBlock || '')}</textarea>
+    `)}
+
+    ${section('components', '&#x2705;', 'Components', `
+      <div class="sub-label">Whitelist of components to include (set(COMPONENTS ...)):</div>
+      <div class="tag-list" id="components_tags"></div>
+      <div class="inline-add">
+        <button class="tag-add-btn" onclick="pickComponents('components')">&#10133; Pick</button>
+      </div>
+    `)}
+
+    ${section('sdkconfig', '&#x2699;&#xFE0F;', 'SDK Config', `
+      <div class="sub-label">SDKCONFIG — path to sdkconfig file:</div>
+      <div class="inline-add">
+        <input type="text" id="sdkconfig_input" value="${esc(formData.sdkconfig || '')}" placeholder="sdkconfig.defaults" oninput="formData.sdkconfig=this.value;setDirty();updatePreview()">
+        <button class="tag-add-btn" onclick="pickSingleFile('sdkconfig')">&#128193; Pick</button>
+      </div>
+
+      <div class="sub-label" style="margin-top:10px">SDKCONFIG_DEFAULTS — list of defaults files:</div>
+      <div class="tag-list" id="sdkconfigDefaults_tags"></div>
+      <div class="inline-add">
+        <input type="text" id="sdkconfigDefaults_input" placeholder="sdkconfig.defaults" onkeydown="if(event.key==='Enter')addFromInput('sdkconfigDefaults','sdkconfigDefaults_input')">
+        <button class="tag-add-btn" onclick="pickFiles('sdkconfigDefaults','any')">&#128193; Pick files</button>
+        <button class="tag-add-btn" onclick="addFromInput('sdkconfigDefaults','sdkconfigDefaults_input')">&#10133; Add</button>
+      </div>
+    `)}
+
+    ${section('ccache', '&#x26A1;', 'Ccache' + (formData.ccacheEnable ? '' : ' <span style="font-weight:400;color:var(--fg2);font-size:11px">(disabled)</span>'), `
+      <div class="ccache-toggle">
+        <input type="checkbox" id="ccacheCheckbox" ${formData.ccacheEnable ? 'checked' : ''} onchange="formData.ccacheEnable=this.checked;setDirty();updatePreview();updateCcacheSectionHeader()">
+        <label class="ccache-toggle-label" for="ccacheCheckbox">
+          <span class="primary-text">Enable ccache</span>
+          <span class="secondary-text">set(CCACHE_ENABLE 1)</span>
+        </label>
+      </div>
+      <div class="ccache-desc">Speed up recompilation by caching previous compilations. Ccache wraps the C/C++ compiler and reuses object files when the same code is compiled again.</div>
+      <div class="ccache-platform-info win" id="ccachePlatformInfo">
+        <span class="platform-icon">&#x2705;</span>
+        <strong>Windows:</strong> ccache is bundled with the SDK and installed automatically.
+      </div>
+      <div class="ccache-platform-info other" id="ccachePlatformInfoOther" style="margin-top:6px">
+        <span class="platform-icon">&#x26A0;&#xFE0F;</span>
+        <strong>Linux &amp; macOS:</strong> ccache is <em>not</em> bundled — install it manually:
+        <br><code style="font-family:var(--vscode-editor-font-family,'Consolas',monospace);background:var(--tag-bg);padding:1px 6px;border-radius:3px;margin-top:2px;display:inline-block">sudo apt install ccache</code>
+        <span style="opacity:0.6">(Debian/Ubuntu)</span> &nbsp;or&nbsp;
+        <code style="font-family:var(--vscode-editor-font-family,'Consolas',monospace);background:var(--tag-bg);padding:1px 6px;border-radius:3px">brew install ccache</code>
+        <span style="opacity:0.6">(macOS)</span>
+      </div>
+    `)}
 
     ${section('exclude', '&#x1F6AB;', 'Excluded Components', `
       <div class="sub-label">Components excluded from build:</div>
@@ -824,7 +989,18 @@ function renderRootForm() {
 
 function renderComponentForm() {
   return `
-    ${section('sources', '&#x1F4C1;', 'Sources', `
+    ${section('preamble', '&#x1F4DD;', 'Custom CMake Code (preamble)' + (formData.preambleBlock && formData.preambleBlock.trim() ? '' : ' <span style="font-weight:400;color:var(--fg2);font-size:11px">(empty)</span>'), `
+      <div class="sub-label">CMake code executed before idf_component_register():</div>
+      <textarea class="preamble-editor" id="preambleEditor"
+                placeholder="# e.g.&#10;if(CONFIG_BT_ENABLED)&#10;    set(COMPONENT_REQUIRES bt)&#10;else()&#10;    set(COMPONENT_REQUIRES)&#10;endif()"
+                oninput="updatePreamble(this.value)">${esc(formData.preambleBlock || '')}</textarea>
+      <div class="var-ref-warning" id="varRefWarning" style="display:${formData.hasVariableRefs ? 'flex' : 'none'}">
+        <span class="warn-icon">&#x26A0;&#xFE0F;</span>
+        <span>Variable references ($&#123;...&#125;) in REQUIRES/PRIV_REQUIRES can't be resolved by the editor. Edit the preamble above to change their values.</span>
+      </div>
+    `)}
+
+    ${section('sources', '&#x1F4C1;', 'Sources' + (formData.srcVarName ? ' <span style="font-weight:400;color:#e8a020;font-size:11px">(via $' + '{' + esc(formData.srcVarName) + '})</span>' : ''), `
       <div class="radio-group">
         <label>
           <input type="radio" name="sourceMode" value="srcs"
@@ -845,6 +1021,7 @@ function renderComponentForm() {
         <div class="tag-list" id="srcs_tags"></div>
         <div class="inline-add">
           <button class="tag-add-btn" onclick="pickFiles('srcs','c')">&#10133; Add files</button>
+          ${formData.srcVarName ? '<button class="tag-add-btn" onclick="flattenSrcsVar()" title="Convert variable reference to explicit file list">⚙️ Flatten $' + '{' + esc(formData.srcVarName) + '}</button>' : ''}
         </div>
       </div>
 
@@ -889,17 +1066,6 @@ function renderComponentForm() {
       </div>
     `)}
 
-    ${section('preamble', '&#x1F4DD;', 'Custom CMake Code (preamble)' + (formData.preambleBlock && formData.preambleBlock.trim() ? '' : ' <span style="font-weight:400;color:var(--fg2);font-size:11px">(empty)</span>'), `
-      <div class="sub-label">CMake code executed before idf_component_register():</div>
-      <textarea class="preamble-editor" id="preambleEditor"
-                placeholder="# e.g.&#10;if(CONFIG_BT_ENABLED)&#10;    set(COMPONENT_REQUIRES bt)&#10;else()&#10;    set(COMPONENT_REQUIRES)&#10;endif()"
-                oninput="updatePreamble(this.value)">${esc(formData.preambleBlock || '')}</textarea>
-      <div class="var-ref-warning" id="varRefWarning" style="display:${formData.hasVariableRefs ? 'flex' : 'none'}">
-        <span class="warn-icon">&#x26A0;&#xFE0F;</span>
-        <span>Variable references ($&#123;...&#125;) in REQUIRES/PRIV_REQUIRES can't be resolved by the editor. Edit the preamble above to change their values.</span>
-      </div>
-    `)}
-
     ${section('deps', '&#x1F517;', 'Component Dependencies', `
       <div class="sub-label">REQUIRES (public &mdash; visible to dependent components):</div>
       <div class="tag-list" id="requires_tags"></div>
@@ -940,6 +1106,13 @@ function renderComponentForm() {
       <div class="inline-add">
         <button class="tag-add-btn" onclick="pickFiles('ldfragments','lf')">&#10133; Pick files</button>
       </div>
+    `)}
+
+    ${section('compPostamble', '&#x1F4DD;', 'Custom CMake Code (after register)' + (formData.postambleBlock && formData.postambleBlock.trim() ? '' : ' <span style="font-weight:400;color:var(--fg2);font-size:11px">(empty)</span>'), `
+      <div class="sub-label">CMake code after idf_component_register() / register_component():</div>
+      <textarea class="preamble-editor" id="compPostambleEditor"
+                placeholder="# e.g.&#10;target_compile_options(\${COMPONENT_LIB} PRIVATE -Werror)&#10;target_compile_definitions(\${COMPONENT_LIB} PRIVATE MY_DEFINE=1)"
+                oninput="updateCompPostamble(this.value)">${esc(formData.postambleBlock || '')}</textarea>
     `)}
 
     ${section('preview', '&#x1F4C4;', 'CMake Preview', `
@@ -990,6 +1163,11 @@ function renderTags(field) {
   const values = formData[field] || [];
   container.innerHTML = values.map((v, i) => {
     const isVar = /\$\{[^}]+\}/.test(v);
+    // Check if this is a conditional source file
+    const condInfo = (field === 'srcs' && formData.conditionalSrcs) 
+      ? formData.conditionalSrcs.find(c => c.file === v) 
+      : null;
+
     if (isVar) {
       return `<span class="tag var-ref" title="Variable reference — edit in Custom CMake preamble">
          <span class="tag-icon">&#x1F517;</span>
@@ -997,8 +1175,14 @@ function renderTags(field) {
          <button class="tag-remove" onclick="removeTag('${field}',${i})" title="Remove">&#10005;</button>
        </span>`;
     }
-    return `<span class="tag">
-       <span class="tag-text">${esc(v)}</span>
+
+    const condBadge = condInfo 
+      ? `<span class="cond-badge" title="Conditional: if(${esc(condInfo.condition)})">⚙ if(${esc(condInfo.condition.length > 30 ? condInfo.condition.substring(0,30)+'...' : condInfo.condition)})</span>` 
+      : '';
+    const condClass = condInfo ? ' conditional' : '';
+
+    return `<span class="tag${condClass}" title="${condInfo ? 'Conditional source: added when ' + esc(condInfo.condition) : esc(v)}">
+       <span class="tag-text">${esc(v)}</span>${condBadge}
        <button class="tag-remove" onclick="removeTag('${field}',${i})" title="Remove">&#10005;</button>
      </span>`;
   }).join('');
@@ -1009,6 +1193,9 @@ function renderTags(field) {
 
 function removeTag(field, index) {
   formData[field].splice(index, 1);
+  if (field === 'srcs' && formData.srcVarName) {
+    formData.srcsModified = true;
+  }
   setDirty();
   renderTags(field);
   updatePreview();
@@ -1023,12 +1210,43 @@ function addTag(field, value) {
   if (!formData[field]) formData[field] = [];
   if (formData[field].includes(value)) return;
   formData[field].push(value);
+  if (field === 'srcs' && formData.srcVarName) {
+    formData.srcsModified = true;
+  }
   setDirty();
   renderTags(field);
   updatePreview();
   if (field === 'srcDirs') {
     requestScan();
   }
+}
+
+function flattenSrcsVar() {
+  if (!formData.srcVarName) return;
+  formData.srcsModified = true;
+  // Strip set(srcs ...) and list(APPEND srcs ...) from preamble
+  if (formData.preambleBlock) {
+    const varName = formData.srcVarName;
+    const escapedVarName = varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    let preamble = formData.preambleBlock;
+    // Remove set(varName ...) — may be multi-line
+    preamble = preamble.replace(new RegExp('set\\s*\\(\\s*' + escapedVarName + '\\s+[\\s\\S]*?\\)\\s*', 'g'), '');
+    // Remove if()/endif() blocks that contain list(APPEND varName ...)
+    preamble = preamble.replace(new RegExp('if\\s*\\([^)]*\\)[\\s\\S]*?list\\s*\\(\\s*APPEND\\s+' + escapedVarName + '\\s+[\\s\\S]*?endif\\s*\\(\\s*\\)\\s*', 'g'), '');
+    // Clean up empty lines
+    preamble = preamble.replace(/\n{3,}/g, '\n\n').trim();
+    formData.preambleBlock = preamble + (preamble ? '\n\n' : '');
+    // Update preamble editor if visible
+    const editor = document.getElementById('preambleEditor');
+    if (editor) editor.value = formData.preambleBlock;
+  }
+  formData.srcVarName = null;
+  formData.srcsOriginalRef = null;
+  formData.srcVarValues = [];
+  formData.conditionalSrcs = [];
+  setDirty();
+  renderForm();
+  updatePreview();
 }
 
 function addFromInput(field, inputId) {
@@ -1050,6 +1268,40 @@ function updatePreamble(value) {
     const titleEl = section.querySelector('.section-title');
     if (titleEl) {
       const baseTitle = 'Custom CMake Code (preamble)';
+      titleEl.innerHTML = value.trim() ? baseTitle : baseTitle + ' <span style="font-weight:400;color:var(--fg2);font-size:11px">(empty)</span>';
+    }
+  }
+}
+
+// ── Root Preamble Editor ──────────────────────────────────
+function updateRootPreamble(value) {
+  formData.rootPreambleBlock = value;
+  setDirty();
+  updatePreview();
+  
+  // Update section header to show (empty) or not
+  const section = document.getElementById('section_rootPreamble');
+  if (section) {
+    const titleEl = section.querySelector('.section-title');
+    if (titleEl) {
+      const baseTitle = 'Custom CMake Code (before project)';
+      titleEl.innerHTML = value.trim() ? baseTitle : baseTitle + ' <span style="font-weight:400;color:var(--fg2);font-size:11px">(empty)</span>';
+    }
+  }
+}
+
+// ── Component Postamble Editor ──────────────────────────────
+function updateCompPostamble(value) {
+  formData.postambleBlock = value;
+  setDirty();
+  updatePreview();
+  
+  // Update section header to show (empty) or not
+  const section = document.getElementById('section_compPostamble');
+  if (section) {
+    const titleEl = section.querySelector('.section-title');
+    if (titleEl) {
+      const baseTitle = 'Custom CMake Code (after register)';
       titleEl.innerHTML = value.trim() ? baseTitle : baseTitle + ' <span style="font-weight:400;color:var(--fg2);font-size:11px">(empty)</span>';
     }
   }
@@ -1082,6 +1334,18 @@ function updateVarRefWarning() {
   warning.style.display = hasVarRefs ? 'flex' : 'none';
 }
 
+// ── CCache Section Header ────────────────────────────────────
+function updateCcacheSectionHeader() {
+  const section = document.getElementById('section_ccache');
+  if (section) {
+    const titleEl = section.querySelector('.section-title');
+    if (titleEl) {
+      const baseTitle = 'Ccache';
+      titleEl.innerHTML = formData.ccacheEnable ? baseTitle : baseTitle + ' <span style="font-weight:400;color:var(--fg2);font-size:11px">(disabled)</span>';
+    }
+  }
+}
+
 // ── CMake syntax highlight for preamble ───────────────────────
 function highlightCmake(code) {
   return code.split('\n').map(line => {
@@ -1109,8 +1373,10 @@ function setSourceMode(mode) {
 // ── Bind Events / Render Tags ─────────────────────────────────
 function bindEvents() {
   if (IS_ROOT) {
+    renderTags('components');
     renderTags('excludeComponents');
     renderTags('extraComponentDirs');
+    renderTags('sdkconfigDefaults');
   } else {
     renderTags('srcs');
     renderTags('srcDirs');
@@ -1147,6 +1413,10 @@ function pickFiles(target, filter) {
   vscode.postMessage({ command: 'pickFiles', target, filter, multi: true });
 }
 
+function pickSingleFile(target) {
+  vscode.postMessage({ command: 'pickFiles', target, filter: 'any', multi: false });
+}
+
 function pickFolder(target) {
   vscode.postMessage({ command: 'pickFolder', target });
 }
@@ -1161,9 +1431,11 @@ function pickComponents(type) {
   if (type === 'requires') title.textContent = 'Pick REQUIRES Components';
   else if (type === 'priv_requires') title.textContent = 'Pick PRIV_REQUIRES Components';
   else if (type === 'exclude') title.textContent = 'Pick Excluded Components';
+  else if (type === 'components') title.textContent = 'Pick Components (Whitelist)';
 
   const currentField = type === 'requires' ? 'requires'
     : type === 'priv_requires' ? 'privRequires'
+    : type === 'components' ? 'components'
     : 'excludeComponents';
   const currentValues = new Set(formData[currentField] || []);
 
@@ -1217,6 +1489,7 @@ function confirmCompPicker() {
 
   const field = compPickerTarget === 'requires' ? 'requires'
     : compPickerTarget === 'priv_requires' ? 'privRequires'
+    : compPickerTarget === 'components' ? 'components'
     : 'excludeComponents';
 
   selected.forEach(c => {
@@ -1258,6 +1531,11 @@ function generateRootPreviewHtml() {
   parts.push(`<span class="kw">cmake_minimum_required</span>(<span class="str">VERSION 3.5</span>)`);
   parts.push(`<span class="kw">include</span>(<span class="var">$ENV{IDF_PATH}</span>/tools/cmake/project.cmake)`);
 
+  if (formData.components && formData.components.length > 0) {
+    const args = formData.components.map(c => `<span class="str">${esc(c)}</span>`).join(' ');
+    parts.push(`<span class="kw">set</span>(COMPONENTS ${args})`);
+  }
+
   if (formData.excludeComponents && formData.excludeComponents.length > 0) {
     const args = formData.excludeComponents.map(c => `<span class="str">${esc(c)}</span>`).join(' ');
     parts.push(`<span class="kw">set</span>(EXCLUDE_COMPONENTS ${args})`);
@@ -1266,6 +1544,23 @@ function generateRootPreviewHtml() {
   if (formData.extraComponentDirs && formData.extraComponentDirs.length > 0) {
     const args = formData.extraComponentDirs.map(d => `<span class="str">${esc(d)}</span>`).join(' ');
     parts.push(`<span class="kw">set</span>(EXTRA_COMPONENT_DIRS ${args})`);
+  }
+
+  if (formData.sdkconfig && formData.sdkconfig.trim()) {
+    parts.push(`<span class="kw">set</span>(SDKCONFIG <span class="str">${esc(formData.sdkconfig.trim())}</span>)`);
+  }
+
+  if (formData.sdkconfigDefaults && formData.sdkconfigDefaults.length > 0) {
+    const args = formData.sdkconfigDefaults.map(d => `<span class="str">${esc(d)}</span>`).join(' ');
+    parts.push(`<span class="kw">set</span>(SDKCONFIG_DEFAULTS ${args})`);
+  }
+
+  if (formData.ccacheEnable) {
+    parts.push(`<span class="kw">set</span>(CCACHE_ENABLE <span class="str">1</span>)`);
+  }
+
+  if (formData.rootPreambleBlock && formData.rootPreambleBlock.trim()) {
+    parts.push(highlightCmake(formData.rootPreambleBlock.trim()));
   }
 
   const projName = formData.projectName || 'my_project';
@@ -1300,8 +1595,13 @@ function generateComponentPreviewHtml() {
     }
   } else {
     if (formData.srcs && formData.srcs.length > 0) {
-      const srcs = formData.srcs.map(s => `<span class="str">"${esc(s)}"</span>`).join(' ');
-      args.push(`    SRCS ${srcs}`);
+      // Variant C: if srcVarName exists and not modified, show variable reference
+      if (formData.srcVarName && !formData.srcsModified) {
+        args.push('    SRCS <span class="var">' + esc('$' + '{' + formData.srcVarName + '}') + '</span>');
+      } else {
+        const srcs = formData.srcs.map(s => `<span class="str">"${esc(s)}"</span>`).join(' ');
+        args.push(`    SRCS ${srcs}`);
+      }
     }
   }
 
@@ -1348,14 +1648,33 @@ function generateComponentPreviewHtml() {
 
   let preambleHtml = '';
   if (formData.preambleBlock && formData.preambleBlock.trim()) {
-    preambleHtml = highlightCmake(formData.preambleBlock.trimEnd()) + '\n\n';
+    let preambleText = formData.preambleBlock.trimEnd();
+    // Variant C: if flattening, strip set()/list(APPEND) for the variable from preview
+    if (formData.srcVarName && formData.srcsModified) {
+      const varName = formData.srcVarName;
+      const escapedVarName = varName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      preambleText = preambleText.replace(new RegExp('set\\s*\\(\\s*' + escapedVarName + '\\s+[\\s\\S]*?\\)', 'g'), '');
+      preambleText = preambleText.replace(new RegExp('if\\s*\\([^)]*\\)[\\s\\S]*?list\\s*\\(\\s*APPEND\\s+' + escapedVarName + '\\s+[\\s\\S]*?endif\\s*\\(\\s*\\)', 'g'), '');
+      preambleText = preambleText.replace(/\n{3,}/g, '\n\n').trim();
+    }
+    if (preambleText.trim()) {
+      preambleHtml = highlightCmake(preambleText.trimEnd()) + '\n\n';
+    }
   }
   
   if (args.length === 0) {
-    return preambleHtml + `<span class="fn">idf_component_register</span>()`;
+    let result = preambleHtml + `<span class="fn">idf_component_register</span>()`;
+    if (formData.postambleBlock && formData.postambleBlock.trim()) {
+      result += '\n\n' + highlightCmake(formData.postambleBlock.trim());
+    }
+    return result;
   }
 
-  return preambleHtml + `<span class="fn">idf_component_register</span>(\n${args.join('\n')}\n)`;
+  let result = preambleHtml + `<span class="fn">idf_component_register</span>(\n${args.join('\n')}\n)`;
+  if (formData.postambleBlock && formData.postambleBlock.trim()) {
+    result += '\n\n' + highlightCmake(formData.postambleBlock.trim());
+  }
+  return result;
 }
 
 /**
@@ -1426,10 +1745,19 @@ function generateLegacyPreviewHtml() {
     lines.push(`<span class="kw">set</span>(<span class="var">COMPONENT_EMBED_TXTFILES</span> ${files})`);
   }
 
-  return lines.join('\n') + '\n\n<span class="fn">register_component</span>()';
+  return lines.join('\n') + '\n\n<span class="fn">register_component</span>()' +
+    (formData.postambleBlock && formData.postambleBlock.trim() ? '\n\n' + highlightCmake(formData.postambleBlock.trim()) : '');
 }
 
 // ── Save ──────────────────────────────────────────────────────
+function refreshFromDisk() {
+  if (isBusy) return;
+  if (isDirty) {
+    if (!confirm('Discard unsaved changes and reload from disk?')) return;
+  }
+  vscode.postMessage({ command: 'refresh' });
+}
+
 function save() {
   if (isBusy) return;  // Prevent saving during build
   vscode.postMessage({ command: 'setDirty', dirty: false });
@@ -1443,8 +1771,13 @@ function save() {
       data: {
         isRoot: true,
         projectName: formData.projectName || '',
+        components: formData.components || [],
         excludeComponents: formData.excludeComponents || [],
         extraComponentDirs: formData.extraComponentDirs || [],
+        sdkconfig: formData.sdkconfig || '',
+        sdkconfigDefaults: formData.sdkconfigDefaults || [],
+        ccacheEnable: formData.ccacheEnable || false,
+        rootPreambleBlock: formData.rootPreambleBlock || '',
         postambleBlock: formData.postambleBlock || '',
         partitionBinLinksBlock: formData.partitionBinLinksBlock || ''
       }
@@ -1464,11 +1797,18 @@ function save() {
         privIncludeDirs: formData.privIncludeDirs || [],
         requires: formData.requires || [],
         privRequires: formData.privRequires || [],
+        requiredIdfTargets: formData.requiredIdfTargets || [],
         embedFiles: formData.embedFiles || [],
         embedTxtFiles: formData.embedTxtFiles || [],
         ldfragments: formData.ldfragments || [],
         preambleBlock: formData.preambleBlock || '',
-        hasVariableRefs: formData.hasVariableRefs || false
+        postambleBlock: formData.postambleBlock || '',
+        hasVariableRefs: formData.hasVariableRefs || false,
+        srcVarName: formData.srcVarName || null,
+        srcVarValues: formData.srcVarValues || [],
+        conditionalSrcs: formData.conditionalSrcs || [],
+        srcsOriginalRef: formData.srcsOriginalRef || null,
+        srcsModified: formData.srcsModified || false
       }
     });
   }
@@ -1501,13 +1841,24 @@ window.addEventListener('message', event => {
 
   if (msg.command === 'setPickedFiles') {
     const files = msg.files || [];
-    files.forEach(f => addTag(msg.target, f));
+    const target = msg.target;
+    if (target === 'sdkconfig') {
+      // Single value — set directly instead of adding to list
+      formData.sdkconfig = files[0] || '';
+      const input = document.getElementById('sdkconfig_input');
+      if (input) input.value = formData.sdkconfig;
+      setDirty();
+      updatePreview();
+    } else {
+      files.forEach(f => addTag(target, f));
+    }
   }
 
   if (msg.command === 'setPickedComponents') {
     const components = msg.components || [];
     const field = msg.type === 'requires' ? 'requires'
       : msg.type === 'priv_requires' ? 'privRequires'
+      : msg.type === 'components' ? 'components'
       : 'excludeComponents';
     components.forEach(c => addTag(field, c));
   }

@@ -212,7 +212,7 @@ const isBuiltIn = '{{IS_BUILTIN}}' === '1';
 const modeLabel = '{{MODE_LABEL}}';
 const modeHint = '{{MODE_HINT}}';
 
-if (!partitions.length) resetDefault();
+if (!partitions.length) resetDefault(false);
 render();
 
 // Show mode badge for built-in partition tables
@@ -243,8 +243,8 @@ document.getElementById('csvFilenameLabel').addEventListener('click', e => {
     vscode.postMessage({ command: 'open' });
 });
 
-function resetDefault() {
-  setDirty();
+function resetDefault(markDirty = true) {
+  if (markDirty) setDirty();
   // ESP8266 hardware limit: app partition MUST NOT cross 1MB boundary.
   // factory starts at 0x10000, so max size = 0x100000 - 0x10000 = 0xF0000 (960KB).
   // Remaining flash (if any) is left free for user to add data partitions.
@@ -725,7 +725,6 @@ window.addEventListener('message', e => {
         binFileSizes[u.index] = u.fileSize;
       }
     });
-    setDirty();
     render();
     return;
   }
@@ -771,7 +770,6 @@ window.addEventListener('message', e => {
     });
     if (warnings.length > 0) {
       vscode.postMessage({ command: 'binSizeWarnings', warnings });
-      setDirty();
     }
   }
 
