@@ -1,6 +1,6 @@
 'use strict';
 
-const { vscode, path, fs, os,
+const { vscode, path, fs, os, cp,
         IS_WIN,
         log, cfg, q,
         getActiveRoot, getValidIdfPath,
@@ -8,6 +8,7 @@ const { vscode, path, fs, os,
         getTerm, buildMarkerCmd, watchCommandDone,
         buildIdfEnvPrefix, warnNoProject,
         getSdkconfigValue, getPartitionCsvFilename,
+        PORT_NAME_REGEX,
 } = require('./helpers');
 
 const { getPythonCmd, checkPythonDeps } = require('./python');
@@ -224,7 +225,7 @@ async function otaPreflight(commandName) {
         port = await cmdSelectPort();
         if (!port) return null;
     }
-    if (port && !/^[a-zA-Z0-9./\\_-]+$/.test(port)) {
+    if (port && !PORT_NAME_REGEX.test(port)) {
         vscode.window.showErrorMessage('ESP: Invalid port name! Shell metacharacters are not allowed.');
         return null;
     }
@@ -265,7 +266,12 @@ function showOtaError(commandName, exitCode) {
         'Device not connected — check the USB cable and COM port',
         'Device has not been flashed with OTA firmware yet — run "ESP › Flash" first',
         'Serial port is busy (monitor or another flash is running) — stop it first',
-        'Device is in download mode — OTA commands need the device in normal (run) mode',
+        // #FIX(1.85.0): OTA flash via otatool.py uses esptool under the hood,
+        // which REQUIRES the chip to be in download mode (GPIO0 low). The
+        // previous hint wrongly said OTA needs the device in run mode — that
+        // contradicts the cmdOtaFlash confirmation dialog and causes users to
+        // keep the device in run mode, leading to repeated failures.
+        'Device is NOT in download mode — hold GPIO0 LOW and reset to enter download mode before OTA flash',
     ];
     vscode.window.showErrorMessage(
         `❌ ${commandName} failed (exit ${exitCode}).\n` +
@@ -509,6 +515,52 @@ async function cmdOtaErase() {
         placeHolder: 'Choose partition to erase',
     });
     if (!picked) return;
+
+    // #FIX: Warn if erasing the active boot slot — could brick the device
+    if (picked.value !== 'otadata' && picked.slot) {
+        const slotName = picked.slot.subtype;
+        // Try to read current boot slot from device (async — does not block UI)
+        const otatoolPathErase = getOtatoolPath();
+        const pycmdErase = pythonCmd.replace(/^& /, '').replace(/^"|"$/g, '');
+        const ptOffset = getSdkconfigValue(root, 'CONFIG_PARTITION_TABLE_OFFSET') || '0x8000';
+        let activeSlot = null;
+        try {
+            const readResult = await new Promise((resolve, reject) => {
+                const readArgs = [otatoolPathErase, '--quiet', '--port', port, '--baud', String(cfg('flashBaud') || 115200), '--partition-table-offset', ptOffset, 'read_otadata'];
+                cp.execFile(pycmdErase, readArgs, {
+                    env: { ...process.env, IDF_PATH: idfPath },
+                    encoding: 'utf8',
+                    timeout: 10000,
+                }, (err, stdout, stderr) => {
+                    if (err) reject(err);
+                    else resolve(stdout);
+                });
+            });
+            // #FIX(1.85.0): otatool.py read_otadata does NOT print
+            // "Active slot: OTA_N" — it prints the raw otadata seq/crc fields
+            // per slot (e.g. "otadata[0]: seq=10, crc=0x...\notadata[1]:
+            // seq=9, crc=0x..."). The active boot slot is the one with the
+            // HIGHER seq number. Parse the first two seq= values and pick the
+            // higher one. Previously the regex never matched, so the
+            // active-slot safety warning below was dead code.
+            const seqMatches = [...readResult.matchAll(/seq\s*=\s*(\d+)/gi)].map(m => parseInt(m[1], 10));
+            if (seqMatches.length >= 2) {
+                const activeIdx = seqMatches[0] >= seqMatches[1] ? 0 : 1;
+                activeSlot = `ota_${activeIdx}`;
+            }
+        } catch {} // If read fails, proceed without extra warning
+
+        if (activeSlot === slotName) {
+            const proceed = await vscode.window.showWarningMessage(
+                `⚠️ You are about to erase ${slotName.toUpperCase()}, which is the currently active boot slot! ` +
+                `The device may become unbootable after this operation. ` +
+                `Consider switching to the other slot first.`,
+                { modal: true, detail: 'Erase the active boot slot anyway? This could brick the device.' },
+                'Erase Anyway', 'Cancel'
+            );
+            if (proceed !== 'Erase Anyway') return;
+        }
+    }
 
     const confirmed = await vscode.window.showWarningMessage(
         `Erase ${picked.label.replace('$(trash) ', '')}? This cannot be undone.`,

@@ -629,11 +629,24 @@
   </div>
 </div>
 
+<!-- Error catcher: runs before main script to catch SyntaxErrors -->
+<script>
+  window.addEventListener('error', function(ev) {
+    var el = document.querySelector('.content') || document.body;
+    if (el) {
+      el.innerHTML = '<div style="padding:20px;color:#f44747;background:rgba(244,71,71,0.05);border:1px solid rgba(244,71,71,0.3);border-radius:6px;margin:8px">' +
+        '<h3 style="margin:0 0 8px">New Component Error</h3>' +
+        '<p style="margin:0;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap">' + (ev.message || 'Unknown error') + '</p>' +
+        '<p style="margin:8px 0 0;color:rgba(255,255,255,0.5);font-size:11px">Try closing and reopening the dialog.</p></div>';
+    }
+  });
+</script>
+
 <script>
 // ── Globals ───────────────────────────────────────────────────
 const vscode = acquireVsCodeApi();
-const AVAILABLE_COMPONENTS = {{AVAILABLE_COMPONENTS}};
-const PROJECT_ROOT = "{{PROJECT_ROOT}}";
+const AVAILABLE_COMPONENTS = {{AVAILABLE_COMPONENTS_JSON}} || [];
+const PROJECT_ROOT = {{PROJECT_ROOT_JSON}} || '';
 
 let formData = {
   compName: '',
@@ -720,9 +733,18 @@ function onCompNameChange() {
     preview.textContent = '';
   }
 
-  // Auto-add default .c file if srcs is empty
-  if (name && formData.srcs.length === 0) {
-    formData.srcs = [name + '.c'];
+  // Auto-add default .c file: replace previous auto-added file or add if empty
+  if (name) {
+    const autoSrc = name + '.c';
+    const prevAutoSrc = (formData._prevCompName || '') + '.c';
+    formData._prevCompName = name;
+    if (formData.srcs.length === 0) {
+      formData.srcs = [autoSrc];
+    } else if (prevAutoSrc && formData.srcs.includes(prevAutoSrc) && prevAutoSrc !== autoSrc) {
+      // Replace old auto-added .c with new one
+      const idx = formData.srcs.indexOf(prevAutoSrc);
+      formData.srcs[idx] = autoSrc;
+    }
     renderTags('srcs');
   }
 
@@ -758,8 +780,9 @@ function addSrcFromInput() {
   if (!input) return;
   const val = input.value.trim();
   if (!val) return;
-  // Auto-add .c extension
-  const fileName = val.endsWith('.c') ? val : val + '.c';
+  const SRC_EXTENSIONS = ['.c', '.cpp', '.cc', '.cxx', '.S', '.s'];
+  const hasSrcExt = SRC_EXTENSIONS.some(ext => val.toLowerCase().endsWith(ext));
+  const fileName = hasSrcExt ? val : val + '.c';
   addTag('srcs', fileName);
   input.value = '';
 }
@@ -786,9 +809,9 @@ function renderCompPickerList(components, selectedSet) {
   ).join('');
 
   list.querySelectorAll('.comp-picker-item').forEach(item => {
-    item.addEventListener('click', () => {
+    item.addEventListener('click', (e) => {
       const cb = item.querySelector('input');
-      cb.checked = !cb.checked;
+      if (e.target !== cb) cb.checked = !cb.checked;
       item.classList.toggle('selected', cb.checked);
     });
   });
@@ -960,7 +983,20 @@ function init() {
   updateCreateButton();
 }
 
-init();
+try {
+  init();
+} catch (e) {
+  console.error('[NewComponent] Init error:', e);
+  var _errEl = document.querySelector('.content') || document.body;
+  if (_errEl) {
+    _errEl.innerHTML = 
+      '<div style="padding:20px;color:#f44747;background:rgba(244,71,71,0.05);border:1px solid rgba(244,71,71,0.3);border-radius:6px">' +
+      '<h3>New Component Initialization Failed</h3>' +
+      '<p style="font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap">' + 
+      (e.message || String(e)) + '</p>' +
+      '<p style="color:rgba(255,255,255,0.5);font-size:11px;margin-top:8px">Try closing and reopening the dialog.</p></div>';
+  }
+}
 </script>
 </body>
 </html>

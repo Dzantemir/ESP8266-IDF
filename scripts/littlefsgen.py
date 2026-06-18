@@ -192,18 +192,21 @@ class LFS(object):
     """
 
     def __init__(self, block_size=4096, block_count=0, name_max=255,
-                 file_max=0, attr_max=0):
+                 file_max=0, attr_max=0, cache_size=64):
         self.block_size = block_size
         self.block_count = block_count
         self.name_max = name_max
         self.file_max = file_max
         self.attr_max = attr_max
+        self.cache_size = cache_size
 
         # inline_max: max bytes stored inline in the metadata pair.
-        # Default matches littlefs: min(block_size/8, cache_size=256)
-        self.inline_max = min(block_size // 8, 256)
+        # Matches littlefs auto-detection: min(cache_size, attr_max, block_size/8)
+        # ESP8266 Arduino Core uses cache_size=64, so inline_max=64.
+        real_attr_max = attr_max if attr_max > 0 else 1022  # LFS_ATTR_MAX default
+        self.inline_max = min(cache_size, real_attr_max, block_size // 8)
         if self.inline_max < 1:
-            self.inline_max = block_size // 8
+            self.inline_max = 1
 
         self.bd = BlockDevice(block_size, block_count)
 
@@ -720,7 +723,9 @@ def _calc_min_image_size(input_dir, block_size, name_max, follow_symlinks=False)
     # Each directory needs a metadata pair (2 blocks).
     # Each file either stores inline (no extra blocks) or as CTZ
     # (data blocks + pointers overhead).
-    inline_max = min(block_size // 8, 256)
+    # ESP8266 Arduino Core: cache_size=64, attr_max=1022, block_size=4096
+    # => inline_max = min(64, 1022, 512) = 64
+    inline_max = min(64, 1022, block_size // 8)
     data_blocks = 0
     for rel, full in files:
         file_size = os.path.getsize(full)

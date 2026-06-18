@@ -111,7 +111,7 @@
   .hex-wrap         { display: flex; align-items: center; gap: 2px; }
   .hex-wrap input   { flex: 1; min-width: 0; }
   .dd-btn           { flex-shrink:0; background: var(--btn-bg); border: 1px solid var(--border);
-                      color: var(--fg); border-radius: 3px; padding: 2px 5px; cursor: pointer;
+                      color: var(--text); border-radius: 3px; padding: 2px 5px; cursor: pointer;
                       font-size: 10px; line-height: 1; opacity: 0.7; }
   .dd-btn:hover     { opacity: 1; }
   /* Portal dropdown — fixed, renders above everything */
@@ -143,7 +143,7 @@
 <div class="page-header">
   <div>
     <h2>⚡ ESP Partition Table Editor</h2>
-    <p class="subtitle">Visual editor for ESP8266 flash partitions → saves to <a href="#" id="csvFilenameLabel" title="Click to open CSV file" style="color:var(--accent);text-decoration:none;cursor:pointer;font-family:var(--vscode-editor-font-family,monospace);font-size:11px;background:var(--badge-bg);padding:1px 5px;border-radius:3px;">{{SAFE_FILENAME}}</a>
+    <p class="subtitle">Visual editor for ESP8266 flash partitions → saves to <a href="#" id="csvFilenameLabel" title="Click to open CSV file" style="color:var(--accent);text-decoration:none;cursor:pointer;font-family:var(--vscode-editor-font-family,monospace);font-size:11px;background:var(--badge-bg);padding:1px 5px;border-radius:3px;"></a>
     <span id="modeBadge" style="display:none;margin-left:8px;font-size:10px;padding:1px 6px;border-radius:3px;font-weight:500;"></span></p>
     <p id="modeHintText" style="display:none;font-size:11px;color:var(--warn);margin-top:2px;"></p>
   </div>
@@ -170,7 +170,7 @@
   <span class="menuconfig-info" title="Flash Size\nSource: menuconfig → Serial Flasher Config → Flash Size (CONFIG_ESPTOOLPY_FLASHSIZE)">
     <span class="menuconfig-label">Flash size:</span>
     <code id="flashSizeDisplay" class="menuconfig-value">{{FLASH_SIZE_LABEL}}</code>
-    <input type="hidden" id="flashSizeSel" value="{{SAFE_FLASH_SIZE}}"/>
+    <input type="hidden" id="flashSizeSel" value=""/>
   </span>
   <button class="primary" id="saveCsvBtn" onclick="save()">💾 Save</button>
 
@@ -197,6 +197,21 @@
 
 <div class="status-bar" id="statusBar"></div>
 
+<!-- Error catcher: runs before main script to catch SyntaxErrors -->
+<script>
+  window.addEventListener('error', function(ev) {
+    var el = document.getElementById('partBody');
+    if (el) {
+      var container = el.closest('.table-wrap') || el.parentElement;
+      if (container) {
+        container.innerHTML = '<div style="padding:20px;color:#f44747;background:rgba(244,71,71,0.05);border:1px solid rgba(244,71,71,0.3);border-radius:6px;margin:8px">' +
+          '<h3 style="margin:0 0 8px">Partition Editor Error</h3>' +
+          '<p style="margin:0;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap">' + (ev.message || 'Unknown error') + '</p>' +
+          '<p style="margin:8px 0 0;color:rgba(255,255,255,0.5);font-size:11px">Try closing and reopening the editor.</p></div>';
+      }
+    }
+  });
+</script>
 <script>
 const vscode = acquireVsCodeApi();
 
@@ -204,16 +219,26 @@ const COLORS =['#4ec9b0','#569cd6','#c586c0','#dcdcaa','#ce9178','#9cdcfe','#4fc
 const APP_SUBTYPES  =['factory','ota_0','ota_1'];
 const DATA_SUBTYPES =['nvs','ota','phy','fatfs','spiffs/littlefs'];
 
-let partitions = {{EXISTING_DATA}};
+let _rawPartitions = {{EXISTING_DATA}};
+let partitions = Array.isArray(_rawPartitions) ? _rawPartitions : [];
 let dragSrc = null;
-let binLinks = {{RESTORED_LINKS_DATA}};  // restored from CMakeLists.txt
+let _rawBinLinks = {{RESTORED_LINKS_DATA}};
+let binLinks = Array.isArray(_rawBinLinks) ? _rawBinLinks : [];  // restored from CMakeLists.txt
 let binFileSizes = new Array(binLinks.length).fill(0);
-const isBuiltIn = '{{IS_BUILTIN}}' === '1';
-const modeLabel = '{{MODE_LABEL}}';
-const modeHint = '{{MODE_HINT}}';
+const isBuiltIn = {{IS_BUILTIN_JSON}} === '1';
+const modeLabel = {{MODE_LABEL_JSON}} || '';
+const modeHint = {{MODE_HINT_JSON}} || '';
 
-if (!partitions.length) resetDefault(false);
-render();
+document.getElementById('flashSizeSel').value = {{SAFE_FLASH_SIZE_JSON}} || '';
+const csvLabel = document.getElementById('csvFilenameLabel');
+if (csvLabel) csvLabel.textContent = {{SAFE_FILENAME_JSON}} || '';
+
+try {
+  if (!partitions.length) resetDefault(false);
+  render();
+} catch (e) {
+  console.error('[PartitionEditor] Init error:', e);
+}
 
 // Show mode badge for built-in partition tables
 function updateModeBadge() {
@@ -317,11 +342,13 @@ function validate() {
   const ptEnd = getPtEnd();
   const ptOffset = getPtOffset();
   let regions =[];
+  const errorRows = new Set();
 
   if (isNaN(ptOffset)) errors.push(`Partition table offset is invalid`);
   if (ptOffset + 0x1000 > flashSize) errors.push(`Partition table offset ${fmtHex(ptOffset)} exceeds flash size`);
 
   partitions.forEach((p, i) => {
+    const errStart = errors.length;
     const off = parseSize(p.offset);
     const sz  = parseSize(p.size);
     if (!p.name.trim())            errors.push(`Row ${i+1}: name is empty`);
@@ -358,17 +385,24 @@ function validate() {
       }
       regions.push({ name: p.name, start: off, end: off + sz, i });
     }
+    if (errors.length > errStart) errorRows.add(i);
   });
 
   for (let a = 0; a < regions.length; a++) {
     for (let b = a+1; b < regions.length; b++) {
-      if (regions[a].start < regions[b].end && regions[b].start < regions[a].end)
+      if (regions[a].start < regions[b].end && regions[b].start < regions[a].end) {
         errors.push(`Overlap: "${regions[a].name}" and "${regions[b].name}"`);
+        errorRows.add(regions[a].i);
+        errorRows.add(regions[b].i);
+      }
     }
   }
 
   const names = partitions.map(p => p.name.trim()).filter(Boolean);
-  names.forEach((n, i) => { if (names.indexOf(n) !== i) errors.push(`Duplicate name: "${n}"`); });
+  names.forEach((n, i) => { if (names.indexOf(n) !== i) {
+    errors.push(`Duplicate name: "${n}"`);
+    partitions.forEach((p, pi) => { if (p.name.trim() === n) errorRows.add(pi); });
+  }});
 
   const sorted = [...partitions]
     .map(p => ({ ...p, off: parseSize(p.offset) }))
@@ -383,7 +417,13 @@ function validate() {
   partitions.forEach((p, i) => {
     if (p.type === 'app' && (!p.offset || p.offset.trim() === '')) {
       errors.push(`Row ${i+1} "${p.name}": app partition offset must not be empty — SDK auto-align may cause 1MB boundary overlap!`);
+      errorRows.add(i);
     }
+  });
+
+  // Apply/remove has-error class on DOM rows
+  document.querySelectorAll('tr.part-row').forEach((row, i) => {
+    row.classList.toggle('has-error', errorRows.has(i));
   });
 
   return errors;

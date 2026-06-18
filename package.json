@@ -2,7 +2,7 @@
 	"name": "esp8266-idf",
 	"displayName": "ESP8266-IDF",
 	"description": "Build, flash, monitor and configure ESP8266-series projects (ESP8266, ESP8285) using ESP8266_RTOS_SDK (idf.py). Supports Windows, Linux and macOS.",
-	"version": "1.83.6",
+	"version": "1.85.1",
 	"publisher": "Dzantemir",
 	"author": "Dzantemir",
 	"license": "MIT",
@@ -616,17 +616,6 @@
 					"default": "none",
 					"description": "Action after successful Build Partition Table"
 				},
-				"esp8266-idf.preFlashAppAction": {
-					"type": "string",
-					"enum": [
-						"none"
-					],
-					"enumDescriptions": [
-						"Flash only (erase not applicable)"
-					],
-					"default": "none",
-					"description": "Action before Flash App"
-				},
 				"esp8266-idf.postFlashAppAction": {
 					"type": "string",
 					"enum": [
@@ -640,17 +629,6 @@
 					"default": "none",
 					"description": "Action after successful Flash App"
 				},
-				"esp8266-idf.preFlashBootloaderAction": {
-					"type": "string",
-					"enum": [
-						"none"
-					],
-					"enumDescriptions": [
-						"Flash only (erase not applicable)"
-					],
-					"default": "none",
-					"description": "Action before Flash Bootloader"
-				},
 				"esp8266-idf.postFlashBootloaderAction": {
 					"type": "string",
 					"enum": [
@@ -663,17 +641,6 @@
 					],
 					"default": "none",
 					"description": "Action after successful Flash Bootloader"
-				},
-				"esp8266-idf.preFlashPartitionAction": {
-					"type": "string",
-					"enum": [
-						"none"
-					],
-					"enumDescriptions": [
-						"Flash only (erase not applicable)"
-					],
-					"default": "none",
-					"description": "Action before Flash Partition Table"
 				},
 				"esp8266-idf.postFlashPartitionAction": {
 					"type": "string",
@@ -771,11 +738,6 @@
 					"default": "hard_reset",
 					"description": "Chip reset mode after flash (esptool --after)"
 				},
-				"esp8266-idf.monitorBaud": {
-					"type": "number",
-					"default": 74880,
-					"description": "Monitor baud rate (passed via MONITORBAUD env variable)"
-				},
 				"esp8266-idf.shellPath": {
 					"type": "string",
 					"default": "",
@@ -847,8 +809,8 @@
 		"@vscode/vsce": "^3.9.1"
 	},
 	"__metadata": {
-		"installedTimestamp": 1780415515803,
+		"installedTimestamp": 1781777481133,
 		"targetPlatform": "undefined",
-		"size": 914223
+		"size": 961302
 	}
 }

@@ -1,7 +1,7 @@
 'use strict';
 
 const { vscode, path, fs, cp,
-        IS_WIN, PYTHON_CACHE_TTL,
+        IS_WIN, PYTHON_CACHE_TTL, getUserShell,
         log, cfg, setCfg, q,
         getActiveRoot, getValidIdfPath, getGlobalCtx,
         setBusy, clearBusy, checkBusy,
@@ -11,14 +11,16 @@ const { vscode, path, fs, cp,
 } = require('./helpers');
 
 // ─── Python detection (cached) ────────────────────────────────────────────────
-// Strip PowerShell-only "& " prefix — cp.exec uses cmd.exe where & is invalid
-function toExecCmd(cmd) { return (cmd || '').replace(/^& /, ''); }
+// Strip PowerShell-only "& " prefix — cp.execFile bypasses the shell where & is invalid
+function toExecCmd(cmd) { return (cmd || '').replace(/^& /, '').replace(/^"|"$/g, '').replace(/^'|'$/g, ''); }
 
 // ─── pip availability check ───────────────────────────────────────────────────
 async function checkPip(pythonCmd, warn = true) {
+    // #FIX(1.85.1): Use cp.execFile instead of cp.exec for shell-injection safety.
+    // Consistent with the otaFlash.js / idfRunner.js fix in v1.85.0.
     const execCmd = toExecCmd(pythonCmd);
     const hasPip = await new Promise(r =>
-        cp.exec(`${execCmd} -m pip --version`, { timeout: 8000 }, (e, stdout, stderr) => {
+        cp.execFile(execCmd, ['-m', 'pip', '--version'], { timeout: 8000 }, (e, stdout, stderr) => {
             log(`[pip] check execCmd="${execCmd}" ok=${!e} out="${(stdout||'').trim()}" err="${(stderr||'').trim()}"`);
             r(!e);
         })
@@ -36,19 +38,29 @@ async function checkPip(pythonCmd, warn = true) {
         log(`[pip] installing via ensurepip for ${pythonCmd}`);
 
         setBusy('Install pip');
+        let markerFile;
+        try {
+            const t = getTerm('ESP: Install pip');
+            t.show(true);
 
-        const t = getTerm('ESP: Install pip');
-        t.show(true);
-
-        const markerFile = path.join(require('os').tmpdir(), `esp_pip_${Date.now()}.tmp`);
-        const termCmd = (IS_WIN && pythonCmd.startsWith('"')) ? `& ${pythonCmd}` : pythonCmd;
-        t.sendText(`${termCmd} -m ensurepip --upgrade${buildMarkerCmd(markerFile)}`);
+            markerFile = path.join(require('os').tmpdir(), `esp_pip_${Date.now()}.tmp`);
+            const termCmd = (IS_WIN && pythonCmd.startsWith('"')) ? `& ${pythonCmd}` : pythonCmd;
+            t.sendText(`${termCmd} -m ensurepip --upgrade${buildMarkerCmd(markerFile)}`);
+        } catch (e) {
+            // #FIX(1.85.0): Terminal creation / sendText threw — release the busy lock
+            // so the extension is not permanently stuck. Previously this was unhandled
+            // because checkPip is invoked fire-and-forget via .catch(()=>{}) in
+            // getPythonCmd, so any throw here left setBusy('Install pip') locked forever.
+            clearBusy();
+            log(`checkPip setup error: ${e && e.message || e}`);
+            return false;
+        }
 
         await watchCommandDone(markerFile, 'ESP: Install pip').catch(() => {});
         clearBusy();
 
         const pipOk = await new Promise(r =>
-            cp.exec(`${toExecCmd(pythonCmd)} -m pip --version`, { timeout: 5000 }, (e) => r(!e))
+            cp.execFile(toExecCmd(pythonCmd), ['-m', 'pip', '--version'], { timeout: 5000 }, (e) => r(!e))
         );
         if (pipOk) {
             vscode.window.showInformationMessage('ESP: pip installed successfully!');
@@ -74,19 +86,23 @@ async function getPythonCmd(force = false, silent = false) {
     const statusMsg = force ? vscode.window.setStatusBarMessage('$(sync~spin) ESP: Detecting Python 3.7...', 10000) : null;
     try {
 
-    const getVersion = (cmd) => new Promise(r =>
-        cp.exec(`${cmd} --version`, { timeout: 3000 }, (e, stdout, stderr) => {
+    const getVersion = (cmd) => new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { reject(new Error(`getVersion timeout: ${cmd}`)); }, 5000);
+        cp.exec(`${cmd} --version`, { timeout: 4000 }, (e, stdout, stderr) => {
+            clearTimeout(timer);
             const m = (stdout + stderr).trim().match(/Python (\d+\.\d+)/);
-            r(m ? m[1] : null);
-        })
-    );
+            resolve(m ? m[1] : null);
+        });
+    });
 
     const found = async (cmd, label) => {
         const termCmd = (IS_WIN && cmd.startsWith('"')) ? `& ${cmd}` : cmd;
         setPythonCmdCache(termCmd);
         setPythonCmdTime(Date.now());
         log(`Python 3.7 detected (${label}): ${termCmd}`);
-        await checkPip(cmd);
+        // #FIX: Fire-and-forget pip check — don't block the return of the Python command
+        // The pip check will show its own UI if pip is missing.
+        checkPip(cmd).catch(() => {});
         return termCmd;
     };
 
@@ -226,9 +242,17 @@ async function requireReady() {
 
 // Returns pip install command parts for requirements.txt (IS_WIN aware)
 function pipInstallReqsParts(idfPath, pythonCmd, reqTxt) {
-    return IS_WIN
-        ? [`$env:IDF_PATH=${q(idfPath)}`, `${pythonCmd} -m pip install -r ${q(reqTxt)}`]
-        : [`export IDF_PATH=${q(idfPath)}`, `${pythonCmd} -m pip install -r ${q(reqTxt)}`];
+    if (IS_WIN) {
+        // #FIX(1.85.0): Branch on configured shell — buildCmd() joins parts with
+        // " && " for cmd.exe, which cannot parse PowerShell's `$env:IDF_PATH=...`
+        // syntax. Emit `set "IDF_PATH=..."` for cmd.exe users.
+        const idfSetCmd = getUserShell().toLowerCase().includes('cmd')
+            ? `set "IDF_PATH=${idfPath}"`
+            : `$env:IDF_PATH=${q(idfPath)}`;
+        return [idfSetCmd, `${pythonCmd} -m pip install -r ${q(reqTxt)}`];
+    } else {
+        return [`export IDF_PATH=${q(idfPath)}`, `${pythonCmd} -m pip install -r ${q(reqTxt)}`];
+    }
 }
 
 // ─── Check python deps before each command ───────────────────────────────────
@@ -238,8 +262,10 @@ async function checkPythonDeps(idfPath, pythonCmd) {
     if (!fs.existsSync(checkDepsPy)) return true;
     const pyExec = pythonCmd.replace(/^& /, '').replace(/^"|"$/g, '').replace(/^'|'$/g, '');
     return new Promise(resolve => {
-        cp.exec(
-            `"${pyExec}" "${checkDepsPy}"`,
+        // #FIX(1.85.1): Use cp.execFile instead of cp.exec for shell-injection safety.
+        // Consistent with the otaFlash.js / idfRunner.js fix in v1.85.0.
+        cp.execFile(
+            pyExec, [checkDepsPy],
             { env: { ...process.env, IDF_PATH: idfPath } },
             async (depErr) => {
                 if (!depErr) { resolve(true); return; }

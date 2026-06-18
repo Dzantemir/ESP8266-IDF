@@ -588,12 +588,26 @@
   </div>
 </div>
 
+<!-- Error catcher: runs before main script to catch SyntaxErrors -->
+<script>
+  window.addEventListener('error', function(ev) {
+    var el = document.getElementById('mainContent');
+    if (el) {
+      el.innerHTML = '<div style="padding:20px;color:#f44747;background:rgba(244,71,71,0.05);border:1px solid rgba(244,71,71,0.3);border-radius:6px;margin:8px">' +
+        '<h3 style="margin:0 0 8px">Edit Component Error</h3>' +
+        '<p style="margin:0;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap">' + (ev.message || 'Unknown error') + '</p>' +
+        '<p style="margin:8px 0 0;color:rgba(255,255,255,0.5);font-size:11px">Try closing and reopening the editor.</p></div>';
+    }
+  });
+</script>
+
 <script>
 // ── Globals ───────────────────────────────────────────────────
 const vscode = acquireVsCodeApi();
-const AVAILABLE_COMPONENTS = {{AVAILABLE_COMPONENTS}};
-const PROJECT_ROOT = "{{PROJECT_ROOT}}";
-const INITIAL_DATA = {{INITIAL_DATA}};
+const AVAILABLE_COMPONENTS = {{AVAILABLE_COMPONENTS_JSON}} || [];
+const PROJECT_ROOT = {{PROJECT_ROOT_JSON}} || '';
+const _RAW_INITIAL_DATA = {{INITIAL_DATA}};
+const INITIAL_DATA = (_RAW_INITIAL_DATA && typeof _RAW_INITIAL_DATA === 'object') ? _RAW_INITIAL_DATA : {};
 
 let formData = {
   compName: INITIAL_DATA.compName || '',
@@ -714,8 +728,9 @@ function addSrcFromInput() {
   if (!input) return;
   const val = input.value.trim();
   if (!val) return;
-  // Auto-add .c extension
-  const fileName = val.endsWith('.c') ? val : val + '.c';
+  const SRC_EXTENSIONS = ['.c', '.cpp', '.cc', '.cxx', '.S', '.s'];
+  const hasSrcExt = SRC_EXTENSIONS.some(ext => val.toLowerCase().endsWith(ext));
+  const fileName = hasSrcExt ? val : val + '.c';
   addTag('srcs', fileName);
   input.value = '';
 }
@@ -749,9 +764,9 @@ function renderCompPickerList(components, selectedSet) {
   ).join('');
 
   list.querySelectorAll('.comp-picker-item').forEach(item => {
-    item.addEventListener('click', () => {
+    item.addEventListener('click', (e) => {
       const cb = item.querySelector('input');
-      cb.checked = !cb.checked;
+      if (e.target !== cb) cb.checked = !cb.checked;
       item.classList.toggle('selected', cb.checked);
     });
   });
@@ -938,7 +953,20 @@ function init() {
   updateSaveButton();
 }
 
-init();
+try {
+  init();
+} catch (e) {
+  console.error('[EditComponent] Init error:', e);
+  var _errEl = document.getElementById('mainContent');
+  if (_errEl) {
+    _errEl.innerHTML = 
+      '<div style="padding:20px;color:#f44747;background:rgba(244,71,71,0.05);border:1px solid rgba(244,71,71,0.3);border-radius:6px">' +
+      '<h3>Edit Component Initialization Failed</h3>' +
+      '<p style="font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap">' + 
+      (e.message || String(e)) + '</p>' +
+      '<p style="color:rgba(255,255,255,0.5);font-size:11px;margin-top:8px">Try closing and reopening the editor.</p></div>';
+  }
+}
 </script>
 </body>
 </html>

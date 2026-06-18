@@ -3,7 +3,7 @@
 const { vscode, path, fs,
         getActiveRoot, getValidIdfPath, getProvider,
         getMonitorRunning, getGlobalCtx,
-        expandHome, getSdkVersion, cfg,
+        expandHome, cfg, log,
 } = require('./helpers');
 
 const { readExcludedComponents } = require('./components');
@@ -75,7 +75,9 @@ class EspProvider {
                 try {
                     if (fs.existsSync(compDir))
                         comps = fs.readdirSync(compDir).filter(n => fs.statSync(path.join(compDir, n)).isDirectory());
-                } catch {}
+                } catch (e) {
+                    log(`[tree] Cannot read components directory: ${e.message}`);
+                }
                 const excludedComps = readExcludedComponents(root);
                 const compItems = comps.map(name => {
                     const isExcluded = excludedComps.includes(name);
@@ -124,10 +126,6 @@ class EspProvider {
             idfLabel   = path.basename(validIdf);
             idfTooltip = validIdf;
             idfDesc    = configuredIdf ? '' : '(from environment)';
-            const sdkVer = getSdkVersion(validIdf);
-            if (sdkVer) {
-                idfDesc = sdkVer + (configuredIdf ? '' : ' (env)');
-            }
         } else if (configuredIdf) {
             idfLabel   = path.basename(configuredIdf);
             idfDesc    = 'error (invalid path)';

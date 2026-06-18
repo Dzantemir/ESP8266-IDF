@@ -24,12 +24,12 @@ const {
         setMonitorRunning,
         setProvider, setPartitionPanel,
         setSdkconfigCache,
-        getPartitionPanel, getProvider, getPushSdkconfigUpdate,
-        getGlobalBusyName, getMonitorRunning,
+        getPartitionPanel, getPushSdkconfigUpdate,
+        getGlobalBusyName, getGlobalBusy,
         getPartitionCsvFilename, getSdkconfigValue,
         getIdfPathOverride, setIdfPathOverride,
         getTerms, setTerms,
-        FLASH_SIZE_MAP,
+        FLASH_SIZE_MAP, PORT_NAME_REGEX, MONITOR_TERM_NAMES,
 } = H;
 
 // ─── Feature modules ──────────────────────────────────────────────────────────
@@ -368,6 +368,35 @@ async function cmdCreateProject() {
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  SETTINGS COMMANDS                                                  ║
 // ╚══════════════════════════════════════════════════════════════════╝
+/**
+ * Check if a folder looks like an ESP8266-IDF project.
+ * Returns: 'full' | 'partial' | 'none'
+ *   - full:    CMakeLists.txt + (main/CMakeLists.txt or components with CMakeLists.txt)
+ *   - partial: only CMakeLists.txt in root
+ *   - none:    no CMakeLists.txt
+ */
+function _checkEspProject(folderPath) {
+    if (!fs.existsSync(path.join(folderPath, 'CMakeLists.txt'))) return 'none';
+
+    // Strong marker: main/CMakeLists.txt (IDF component)
+    if (fs.existsSync(path.join(folderPath, 'main', 'CMakeLists.txt'))) return 'full';
+
+    // Strong marker: components/ with at least one subfolder containing CMakeLists.txt
+    const compDir = path.join(folderPath, 'components');
+    if (fs.existsSync(compDir)) {
+        try {
+            const entries = fs.readdirSync(compDir, { withFileTypes: true });
+            for (const entry of entries) {
+                if (entry.isDirectory() && fs.existsSync(path.join(compDir, entry.name, 'CMakeLists.txt'))) {
+                    return 'full';
+                }
+            }
+        } catch {}
+    }
+
+    return 'partial';
+}
+
 async function cmdSelectProject() {
     if (checkBusy()) return;
     if (getPartitionPanel()) {
@@ -379,16 +408,51 @@ async function cmdSelectProject() {
         vscode.commands.executeCommand('workbench.action.files.openFolder');
         return;
     }
-    const items = folders.map(f => ({
-        label: path.basename(f.uri.fsPath),
-        description: f.uri.fsPath,
-        detail: f.uri.fsPath === getActiveRoot() ? '$(check) active' : '',
-        fsPath: f.uri.fsPath,
-    }));
+    const items = folders.map(f => {
+        const isActive = f.uri.fsPath === getActiveRoot();
+        const projectType = _checkEspProject(f.uri.fsPath);
+        let icon, hint;
+        if (projectType === 'full') {
+            icon = '$(check)';
+            hint = 'ESP8266-IDF project';
+        } else if (projectType === 'partial') {
+            icon = '$(warning)';
+            hint = 'CMakeLists.txt found but no main/ or components/ — may not be an IDF project';
+        } else {
+            icon = '$(error)';
+            hint = 'No CMakeLists.txt — not an ESP8266-IDF project';
+        }
+        return {
+            label: `${icon}  ${path.basename(f.uri.fsPath)}`,
+            description: f.uri.fsPath,
+            detail: isActive ? `$(check) active — ${hint}` : hint,
+            fsPath: f.uri.fsPath,
+            projectType,
+        };
+    });
     const picked = await vscode.window.showQuickPick(items, {
         title: 'ESP8266-IDF Tools › Select project', placeHolder: 'Select workspace folder'
     });
     if (!picked) return;
+    // #FIX: Verify the selected path still exists before setting it as active
+    if (!fs.existsSync(picked.fsPath)) {
+        vscode.window.showWarningMessage(`ESP: Folder no longer exists: ${picked.fsPath}`);
+        return;
+    }
+    // Warn if folder doesn't look like an IDF project
+    if (picked.projectType === 'none') {
+        const ans = await vscode.window.showWarningMessage(
+            `ESP: "${path.basename(picked.fsPath)}" does not appear to be an ESP8266-IDF project (no CMakeLists.txt). Continue anyway?`,
+            'Continue', 'Cancel'
+        );
+        if (ans !== 'Continue') return;
+    } else if (picked.projectType === 'partial') {
+        const ans = await vscode.window.showWarningMessage(
+            `ESP: "${path.basename(picked.fsPath)}" has CMakeLists.txt but no main/ or components/ — it may not be a valid IDF project. Continue?`,
+            'Continue', 'Cancel'
+        );
+        if (ans !== 'Continue') return;
+    }
     // Close all editor webviews before switching project
     CmakeEditor.closeAllCmakePanels();
     NewProjectEditor.closeNewProjectPanel();
@@ -744,7 +808,9 @@ function parsePartitionCsvForFsParts(root, subtypes) {
         for (const line of csv.split('\n')) {
             const trimmed = line.trim();
             if (!trimmed || trimmed.startsWith('#')) continue;
-            const parts = trimmed.split(',').map(s => s.trim());
+            // #FIX: Use quote-aware CSV splitting — partition names may contain
+            // commas inside double quotes (e.g. "ota,0")
+            const parts = _splitCsvLine(trimmed);
             if (parts.length < 5) continue;
             const subtype = (parts[2] || '').toLowerCase();
             // Match: spiffs, fat, fatfs, littlefs
@@ -754,6 +820,44 @@ function parsePartitionCsvForFsParts(root, subtypes) {
         }
     } catch {}
     return results;
+}
+
+/**
+ * Quote-aware CSV line splitter. Handles double-quoted fields that may
+ * contain commas (e.g. `"ota,0",data,ota,0x9000,0x2000`).
+ * @param {string} line  A single CSV line
+ * @returns {string[]} Array of trimmed field values (quotes removed)
+ */
+function _splitCsvLine(line) {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (inQuotes) {
+            if (ch === '"') {
+                if (i + 1 < line.length && line[i + 1] === '"') {
+                    current += '"'; // escaped quote
+                    i++;
+                } else {
+                    inQuotes = false;
+                }
+            } else {
+                current += ch;
+            }
+        } else {
+            if (ch === '"') {
+                inQuotes = true;
+            } else if (ch === ',') {
+                result.push(current.trim());
+                current = '';
+            } else {
+                current += ch;
+            }
+        }
+    }
+    result.push(current.trim());
+    return result;
 }
 
 function getEsptoolPath() {
@@ -785,36 +889,32 @@ function getEsptoolPath() {
 async function cmdFlashFsImage(fsLabel, subtypes, binSuffix) {
     if (checkBusy()) return;
 
-    // #37: Use a helper that ensures clearBusy() on every early return
-    const _earlyReturn = () => { clearBusy(); };
+    try {
     setBusy(`Flash ${fsLabel}`);
 
-    try {
     const root = getActiveRoot();
-    if (!root) { _earlyReturn(); warnNoProject(); return; }
+    if (!root) { warnNoProject(); return; }
 
     const pythonCmd = await Python.getPythonCmd(true);
-    if (!pythonCmd) { _earlyReturn(); return; }
+    if (!pythonCmd) { return; }
 
     const idfPath = getValidIdfPath();
     if (!idfPath) {
-        _earlyReturn();
         vscode.window.showErrorMessage('ESP: IDF_PATH not set or invalid!');
         return;
     }
 
     // #24: Check tools (esptool etc.) before proceeding
     const toolsOk = await IdfRunner.checkToolsOrPrompt(idfPath, pythonCmd);
-    if (!toolsOk) { _earlyReturn(); return; }
+    if (!toolsOk) { return; }
 
     // Check Python dependencies before running esptool
-    if (!await Python.checkPythonDeps(idfPath, pythonCmd)) { _earlyReturn(); return; }
+    if (!await Python.checkPythonDeps(idfPath, pythonCmd)) { return; }
 
     // 1. Find matching partitions in CSV
     const fsParts = parsePartitionCsvForFsParts(root, subtypes);
 
     if (fsParts.length === 0) {
-        _earlyReturn();
         const ans = await vscode.window.showErrorMessage(
             `ESP Flash ${fsLabel}: No ${fsLabel} partition found in partition table.\n` +
             'Add a partition with the correct SubType first.',
@@ -851,7 +951,7 @@ async function cmdFlashFsImage(fsLabel, subtypes, binSuffix) {
             filters: { 'Binary files': ['bin'], 'All files': ['*'] },
             openLabel: 'Select firmware',
         });
-        if (!uris?.length) { _earlyReturn(); return; }
+        if (!uris?.length) { return; }
         foundBins = [uris[0].fsPath];
     }
 
@@ -870,7 +970,7 @@ async function cmdFlashFsImage(fsLabel, subtypes, binSuffix) {
             title: `Flash ${fsLabel}: Select target partition`,
             placeHolder: 'Choose which partition to flash to',
         });
-        if (!picked) { _earlyReturn(); return; }
+        if (!picked) { return; }
         selectedPart = picked.part;
     }
 
@@ -889,7 +989,7 @@ async function cmdFlashFsImage(fsLabel, subtypes, binSuffix) {
             title: `Flash ${fsLabel}: Select .bin file`,
             placeHolder: 'Choose which .bin file to flash',
         });
-        if (!picked) { _earlyReturn(); return; }
+        if (!picked) { return; }
         selectedBin = picked.binPath;
     }
 
@@ -897,12 +997,11 @@ async function cmdFlashFsImage(fsLabel, subtypes, binSuffix) {
     let port = cfg('comPort');
     if (!port) {
         port = await Ports.cmdSelectPort();
-        if (!port) { _earlyReturn(); return; }
+        if (!port) { return; }
     }
 
     // #46: Validate port for shell metacharacters
-    if (port && !/^[a-zA-Z0-9./\\_-]+$/.test(port)) {
-        _earlyReturn();
+    if (port && !PORT_NAME_REGEX.test(port)) {
         vscode.window.showErrorMessage('ESP: Invalid port name! Shell metacharacters are not allowed.');
         return;
     }
@@ -911,7 +1010,7 @@ async function cmdFlashFsImage(fsLabel, subtypes, binSuffix) {
     if (port) {
         const portHolder = { port };
         const portOk = await Ports.confirmPortOrReselect(portHolder);
-        if (!portOk) { _earlyReturn(); return; }
+        if (!portOk) { return; }
         port = portHolder.port;
         if (port !== cfg('comPort')) await setCfg('comPort', port);
     }
@@ -922,12 +1021,11 @@ async function cmdFlashFsImage(fsLabel, subtypes, binSuffix) {
         { modal: true, detail: `This will overwrite the ${fsLabel} partition on the device.\nOffset: ${selectedPart.offset}\nPort: ${port}` },
         'Flash'
     );
-    if (confirmed !== 'Flash') { _earlyReturn(); return; }
+    if (confirmed !== 'Flash') { return; }
 
     // 7. Run esptool.py write_flash
     const esptoolPath = getEsptoolPath();
     if (!esptoolPath) {
-        _earlyReturn();
         vscode.window.showErrorMessage('ESP: esptool.py not found! Check that the ESP8266_RTOS_SDK is installed correctly.');
         return;
     }
@@ -987,7 +1085,12 @@ async function cmdFlashFsImage(fsLabel, subtypes, binSuffix) {
 
     log(`[Flash ${fsLabel}] writing ${selectedBin} to offset ${selectedPart.offset} on ${port} (overrideFlash=${overrideFlash})`);
 
-    watchCommandDone(markerFile, termName).then(exitCode => {
+    // #FIX(1.85.0): Await the watch promise so the finally block runs only after
+    // esptool finishes writing to flash. Previously the .then().catch() chain was
+    // neither awaited nor returned, so finally (and clearBusy) fired synchronously
+    // while the flash was still in progress — allowing concurrent commands to
+    // collide on the serial port.
+    await watchCommandDone(markerFile, termName).then(exitCode => {
         if (exitCode === 0) {
             vscode.window.showInformationMessage(`✅ Flash ${fsLabel}: ${path.basename(selectedBin)} written to "${selectedPart.name}" at ${selectedPart.offset}!`);
             log(`[Flash ${fsLabel}] ✅ OK`);
@@ -997,18 +1100,24 @@ async function cmdFlashFsImage(fsLabel, subtypes, binSuffix) {
                 log(`[Flash ${fsLabel}] starting monitor (postFlashFsAction=monitor)`);
                 clearBusy(); // Must clear before runFlash — it checks checkBusy() first
                 Flash.runFlash('monitor');
-                return; // monitor will set its own busy state
+                return; // monitor will set its own busy state — skip finally's clearBusy
             }
         } else if (exitCode > 0) {
             vscode.window.showErrorMessage(`❌ Flash ${fsLabel} failed (exit ${exitCode}). Check terminal for details.`);
             log(`[Flash ${fsLabel}] ❌ failed (exit ${exitCode})`);
         }
-        clearBusy();
-    }).catch(() => clearBusy());
+        // clearBusy handled by finally below
+    }).catch(() => {/* clearBusy handled by finally */});
 
     } catch (e) {
-        clearBusy();
         log(`[Flash ${fsLabel}] error: ${e.message}`);
+    } finally {
+        // #FIX: Single clearBusy in finally — only if still busy with our task.
+        // The monitor branch clears busy itself and returns early above,
+        // so we don't double-clear (which would wipe the monitor's busy state).
+        if (getGlobalBusy() && getGlobalBusyName() === `Flash ${fsLabel}`) {
+            clearBusy();
+        }
     }
 }
 
@@ -1224,7 +1333,7 @@ function activate(ctx) {
     const folders   = vscode.workspace.workspaceFolders;
     const savedRoot = ctx.workspaceState.get('espActiveRoot');
     if (savedRoot && folders?.find(f => f.uri.fsPath === savedRoot)) {
-        setActiveRoot(savedRoot);
+        setActiveRoot(savedRoot, false); // Skip auto-open on startup restore
     }
 
     ctx.subscriptions.push(
@@ -1234,8 +1343,7 @@ function activate(ctx) {
                 if (t === closed) {
                     delete terms[name];
                     log(`Terminal closed: "${name}"`);
-                    const monitorTermNames = ['ESP › Monitor', 'ESP › Flash & Monitor', 'ESP › Erase & Flash & Monitor', 'ESP › App flash & Monitor', 'ESP › Bootloader flash & Monitor', 'ESP › Partition table flash & Monitor'];
-                    if (monitorTermNames.includes(name)) {
+                    if (MONITOR_TERM_NAMES.includes(name)) {
                         setMonitorRunning(false);
                         clearBusy();
                         StatusBar.refreshMonitorButton();
@@ -1258,24 +1366,35 @@ function activate(ctx) {
     };
 
     scheduleAutoGenerate(2000);
+    // #FIX(1.85.0): Track the autoGen timer so deactivate() can clear it.
+    ctx.subscriptions.push({ dispose: () => { if (_autoGenTimer) { clearTimeout(_autoGenTimer); _autoGenTimer = null; } } });
 
     const treeView = vscode.window.createTreeView('esp8266-idf.projectView', { treeDataProvider: provider });
 
-    setTimeout(() => {
+    // #FIX(1.85.0): Track the startup timer so deactivate() can clear it.
+    const _startupTimer = setTimeout(() => {
         const startupIdfPath = getValidIdfPath();
         if (startupIdfPath) ensureVersionTxt(startupIdfPath);
         IdfRunner.checkEnvironment(true).then(ok => { if (ok) IdfRunner.checkAndInstallTools(); });
     }, 500);
+    ctx.subscriptions.push({ dispose: () => clearTimeout(_startupTimer) });
 
-    treeView.onDidCollapseElement(e => {
-        if (e.element.id) ctx.workspaceState.update(`espGroupState_${e.element.id}`, vscode.TreeItemCollapsibleState.Collapsed);
-    });
-    treeView.onDidExpandElement(e => {
-        if (e.element.id) ctx.workspaceState.update(`espGroupState_${e.element.id}`, vscode.TreeItemCollapsibleState.Expanded);
-    });
+    // #FIX(1.85.0): Push the TreeView listener disposables to ctx.subscriptions
+    // — previously the return values were dropped, leaking duplicate handlers
+    // across reactivations and a checkbox write-queue that kept firing after
+    // deactivation.
+    ctx.subscriptions.push(
+        treeView.onDidCollapseElement(e => {
+            if (e.element.id) ctx.workspaceState.update(`espGroupState_${e.element.id}`, vscode.TreeItemCollapsibleState.Collapsed);
+        }),
+        treeView.onDidExpandElement(e => {
+            if (e.element.id) ctx.workspaceState.update(`espGroupState_${e.element.id}`, vscode.TreeItemCollapsibleState.Expanded);
+        }),
+    );
 
     let _checkboxWriteQueue = Promise.resolve();
-    treeView.onDidChangeCheckboxState(e => {
+    ctx.subscriptions.push(
+        treeView.onDidChangeCheckboxState(e => {
         if (checkBusy()) {
             provider.refresh();
             return;
@@ -1300,7 +1419,8 @@ function activate(ctx) {
             }
             provider.refresh();
         }).catch(() => {});
-    });
+    })
+    );
 
     ctx.subscriptions.push(
         treeView,
@@ -1329,7 +1449,11 @@ function activate(ctx) {
                 Components.closeEditComponentPanel();
                 SettingsEditor.closeSettingsPanel();
                 if (getPartitionPanel()) { getPartitionPanel().dispose(); setPartitionPanel(null); }
-                setActiveRoot(current[0]?.uri.fsPath || null);
+                // #FIX(1.85.0): Prefer the first remaining folder that is an ESP8266-IDF
+                // project before falling back to current[0]. Previously the active root
+                // could silently switch to a non-project folder (e.g. node_modules, docs).
+                const espFolder = current.find(f => _checkEspProject(f.uri.fsPath) !== 'none');
+                setActiveRoot((espFolder || current[0])?.uri.fsPath || null);
                 if (getGlobalCtx()) ctx.workspaceState.update('espActiveRoot', getActiveRoot());
             }
             provider.refresh();
@@ -1476,11 +1600,14 @@ function activate(ctx) {
 function deactivate() {
     clearBusy();
     setMonitorRunning(false);
+    // #FIX(1.85.0): Clear module-level timers in helpers so they cannot fire
+    // on a deactivated extension (would touch disposed StatusBarItem instances).
+    try { H.disposeTimers(); } catch {}
     try {
         const tmpDir = os.tmpdir();
         const files = fs.readdirSync(tmpDir);
         for (const f of files) {
-            if (/^esp_(bld|cmd|chain|pip|install|req|spiffs|fatfs|littlefs|ota|ota_switch|ota_erase|ota_read|flash_fs)_\d+\.tmp$/.test(f)) {
+            if (/^esp_(bld|cmd|chain|pip|install|req|spiffs(_auto)?|fatfs|littlefs|ota|ota_switch|ota_erase|ota_read|flash_fs)_\d+\.tmp$/.test(f)) {
                 try { fs.unlinkSync(path.join(tmpDir, f)); } catch {}
             }
         }

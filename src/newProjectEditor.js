@@ -83,20 +83,11 @@ function cmdNewProjectEditor() {
             return;
         }
 
-        if (msg.command === 'pickExcludedComponents') {
-            try {
-                const excluded = await pickExcludedComponents(null);
-                if (excluded === undefined) return; // cancelled
-                panel.webview.postMessage({
-                    command: 'setPickedComponents',
-                    type: 'exclude',
-                    components: excluded,
-                });
-            } catch (e) {
-                vscode.window.showErrorMessage(`ESP: Component picker failed: ${e.message}`);
-            }
-            return;
-        }
+        // #FIX(1.85.0): removed dead pickExcludedComponents handler — the
+        // HTML (new-project.html) uses its own LOCAL component picker overlay
+        // (function pickExcludedComponents opens an in-page overlay, never
+        // posts a 'pickExcludedComponents' message to the host), so this
+        // branch was unreachable dead code.
 
         if (msg.command === 'createProject') {
             try {
@@ -159,51 +150,60 @@ function cmdNewProjectEditor() {
 // ╚══════════════════════════════════════════════════════════════════╝
 
 function _createRtosProject(projectDir, name, cmakeStyle = 'modern', headersChoice = 'dot', excluded = []) {
-    fs.mkdirSync(path.join(projectDir, 'main'), { recursive: true });
+    const createdPaths = [];
+    try {
+        fs.mkdirSync(path.join(projectDir, 'main'), { recursive: true });
+        createdPaths.push(path.join(projectDir, 'main'));
 
-    if (headersChoice === 'include') {
-        fs.mkdirSync(path.join(projectDir, 'main', 'include'), { recursive: true });
-    }
-
-    // ── Root CMakeLists.txt ─────────────────────────────────────
-    const cmakeMinVer = cmakeStyle === 'modern' ? '3.16' : '3.5';
-    let rootCmake = `cmake_minimum_required(VERSION ${cmakeMinVer})\n\ninclude($ENV{IDF_PATH}/tools/cmake/project.cmake)\n`;
-    if (excluded.length) {
-        rootCmake += `set(EXCLUDE_COMPONENTS ${excluded.join(' ')})\n`;
-    }
-    rootCmake += `project(${name})\n`;
-    fs.writeFileSync(path.join(projectDir, 'CMakeLists.txt'), rootCmake);
-
-    // ── main/CMakeLists.txt — depends on style ──────────────────
-    let mainCmake;
-
-    if (cmakeStyle === 'modern') {
-        // Modern (ESP-IDF v4.x/v5.x): idf_component_register(SRCS ... INCLUDE_DIRS ...)
-        const includeDir = headersChoice === 'include' ? '"include"'
-                        : headersChoice === 'dot'     ? '"."'
-                        : null;
-        if (includeDir) {
-            mainCmake = `idf_component_register(\n    SRCS "main.c"\n    INCLUDE_DIRS ${includeDir}\n)\n`;
-        } else {
-            mainCmake = `idf_component_register(\n    SRCS "main.c"\n)\n`;
+        if (headersChoice === 'include') {
+            fs.mkdirSync(path.join(projectDir, 'main', 'include'), { recursive: true });
+            createdPaths.push(path.join(projectDir, 'main', 'include'));
         }
-    } else {
-        // Legacy (ESP8266 RTOS SDK v3.x): register_component() + COMPONENT_SRCS
-        const incLineLegacy = headersChoice === 'include' ? '\nset(COMPONENT_ADD_INCLUDEDIRS "include")'
-                      : headersChoice === 'dot'     ? '\nset(COMPONENT_ADD_INCLUDEDIRS ".")'
-                      : '';
-        mainCmake = `set(COMPONENT_SRCS "main.c")${incLineLegacy}\n\nregister_component()\n`;
-    }
 
-    fs.writeFileSync(path.join(projectDir, 'main', 'CMakeLists.txt'), mainCmake);
+        // ── Root CMakeLists.txt ─────────────────────────────
+        const cmakeMinVer = cmakeStyle === 'modern' ? '3.16' : '3.5';
+        let rootCmake = `cmake_minimum_required(VERSION ${cmakeMinVer})\n\ninclude($ENV{IDF_PATH}/tools/cmake/project.cmake)\n`;
+        if (excluded.length) {
+            rootCmake += `set(EXCLUDE_COMPONENTS ${excluded.join(' ')})\n`;
+        }
+        rootCmake += `project(${name})\n`;
+        const rootCmakePath = path.join(projectDir, 'CMakeLists.txt');
+        fs.writeFileSync(rootCmakePath, rootCmake);
+        createdPaths.push(rootCmakePath);
 
-    // ── Header file ─────────────────────────────────────────────
-    if (headersChoice !== 'none') {
-        const headerDir = headersChoice === 'include'
-            ? path.join(projectDir, 'main', 'include')
-            : path.join(projectDir, 'main');
-        const guard = name.toUpperCase().replace(/[^A-Z0-9]/g, '_') + '_H';
-        fs.writeFileSync(path.join(headerDir, `${name}.h`),
+        // ── main/CMakeLists.txt — depends on style ──────────────────
+        let mainCmake;
+
+        if (cmakeStyle === 'modern') {
+            // Modern (ESP-IDF v4.x/v5.x): idf_component_register(SRCS ... INCLUDE_DIRS ...)
+            const includeDir = headersChoice === 'include' ? '"include"'
+                            : headersChoice === 'dot'     ? '"."'
+                            : null;
+            if (includeDir) {
+                mainCmake = `idf_component_register(\n    SRCS "main.c"\n    INCLUDE_DIRS ${includeDir}\n)\n`;
+            } else {
+                mainCmake = `idf_component_register(\n    SRCS "main.c"\n)\n`;
+            }
+        } else {
+            // Legacy (ESP8266 RTOS SDK v3.x): register_component() + COMPONENT_SRCS
+            const incLineLegacy = headersChoice === 'include' ? '\nset(COMPONENT_ADD_INCLUDEDIRS "include")'
+                          : headersChoice === 'dot'     ? '\nset(COMPONENT_ADD_INCLUDEDIRS ".")'
+                          : '';
+            mainCmake = `set(COMPONENT_SRCS "main.c")${incLineLegacy}\n\nregister_component()\n`;
+        }
+
+        const mainCmakePath = path.join(projectDir, 'main', 'CMakeLists.txt');
+        fs.writeFileSync(mainCmakePath, mainCmake);
+        createdPaths.push(mainCmakePath);
+
+        // ── Header file ─────────────────────────────────────
+        if (headersChoice !== 'none') {
+            const headerDir = headersChoice === 'include'
+                ? path.join(projectDir, 'main', 'include')
+                : path.join(projectDir, 'main');
+            const guard = name.toUpperCase().replace(/[^A-Z0-9]/g, '_') + '_H';
+            const headerPath = path.join(headerDir, `${name}.h`);
+            fs.writeFileSync(headerPath,
 `#ifndef ${guard}
 #define ${guard}
 
@@ -211,10 +211,12 @@ function _createRtosProject(projectDir, name, cmakeStyle = 'modern', headersChoi
 
 #endif // ${guard}
 `);
-    }
+            createdPaths.push(headerPath);
+        }
 
-    // ── main.c ──────────────────────────────────────────────────
-    fs.writeFileSync(path.join(projectDir, 'main', 'main.c'),
+        // ── main.c ──────────────────────────────────────────
+        const mainCPath = path.join(projectDir, 'main', 'main.c');
+        fs.writeFileSync(mainCPath,
 `#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -227,6 +229,24 @@ void app_main()
     }
 }
 `);
+        createdPaths.push(mainCPath);
+    } catch (e) {
+        // #FIX: Rollback — remove any files/directories we created before the error
+        log(`[newProject] Creation failed, rolling back: ${e.message}`);
+        for (let i = createdPaths.length - 1; i >= 0; i--) {
+            try {
+                const stat = fs.statSync(createdPaths[i]);
+                if (stat.isDirectory()) {
+                    fs.rmdirSync(createdPaths[i], { recursive: true });
+                } else {
+                    fs.unlinkSync(createdPaths[i]);
+                }
+            } catch {}
+        }
+        // Try to remove the project directory itself if it's empty
+        try { fs.rmdirSync(projectDir, { recursive: true }); } catch {}
+        throw e;
+    }
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -282,6 +302,8 @@ function _getNewProjectHtml(availableComponents) {
 
     // Replace placeholders
     html = html.replace(/\{\{AVAILABLE_COMPONENTS\}\}/g, JSON.stringify(availableComponents));
+    // JSON-safe templates (new — for _JSON suffixed placeholders in HTML):
+    html = html.replace(/\{\{AVAILABLE_COMPONENTS_JSON\}\}/g, JSON.stringify(availableComponents).replace(/<\//g, '<\\/'));
 
     return html;
 }

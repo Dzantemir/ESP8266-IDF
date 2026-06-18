@@ -217,7 +217,8 @@ class FATFS:
                              path_from_root=split_path[1:-1] or None,
                              object_timestamp_=object_timestamp,
                              is_empty=len(content) == 0)
-            self.write_content(split_path[1:], content)
+            if content:
+                self.write_content(split_path[1:], content)
         elif os.path.isdir(real_path):
             if not is_dir:
                 self.create_directory(name=split_path[-1],

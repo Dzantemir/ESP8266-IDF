@@ -1,7 +1,7 @@
 'use strict';
 
 const { vscode, path, fs, cp, os,
-        IS_WIN,
+        IS_WIN, getUserShell,
         log, cfg, setCfg, q,
         getActiveRoot, getValidIdfPath, getGlobalCtx,
         setBusy, clearBusy, checkBusy,
@@ -11,7 +11,7 @@ const { vscode, path, fs, cp, os,
         setPythonCmdCache,
 } = require('./helpers');
 
-const { toExecCmd, getPythonCmd, pipInstallReqsParts, checkPip } = require('./python');
+const { getPythonCmd, pipInstallReqsParts, checkPip } = require('./python');
 
 // ─── RTOS SDK structure check ────────────────────────────────────────────────
 function checkRtosSdkStructure(idfPath) {
@@ -183,19 +183,39 @@ async function checkToolsOrPrompt(idfPath, pythonCmd) {
     const idfToolsPy = path.join(idfPath, 'tools', 'idf_tools.py');
     if (!fs.existsSync(idfToolsPy)) { setToolsVerified(true); return true; }
 
+    // #FIX: Strip shell quotes from pythonCmd for execFile — cp.execFile()
+    // executes the binary directly (no shell), so surrounding quotes are
+    // treated as part of the filename and the call fails silently.
+    const pyExec = pythonCmd.replace(/^& /, '').replace(/^"|"$/g, '').replace(/^'|'$/g, '');
+
     return new Promise(resolve => {
-        cp.exec(
-            `${toExecCmd(pythonCmd)} "${idfToolsPy}" check`,
+        cp.execFile(
+            pyExec, [idfToolsPy, 'check'],
             { env: { ...process.env, IDF_PATH: idfPath } },
             async (err, stdout, stderr) => {
-                const toolsMissing = err || (stderr && stderr.includes('ERROR:'));
-                if (!toolsMissing) {
+                // #FIX: Only treat as "tools missing" if the specific ERROR message
+                // from idf_tools.py is present. A non-zero exit code or generic
+                // "ERROR" in stderr can be triggered by warnings, deprecation
+                // notices, or Python import warnings — not by missing tools.
+                const combined = (stdout || '') + (stderr || '');
+                const hasToolError = combined.match(/ERROR:\s+The following required tools were not found:/i);
+                // #FIX(1.85.0): If idf_tools.py failed to spawn (python ENOENT, import
+                // error, etc.), `err` is truthy but `hasToolError` is null — previously
+                // this fell through to setToolsVerified(true), treating a crash as
+                // "tools verified OK". Resolve false WITHOUT marking verified so the
+                // caller knows the check failed and can retry.
+                if (err && !hasToolError) {
+                    log('[checkToolsOrPrompt] idf_tools.py check failed: ' + (err.message || err));
+                    resolve(false);
+                    return;
+                }
+                if (!hasToolError) {
                     setToolsVerified(true);
+                    log('[checkToolsOrPrompt] Build tools verified OK');
                     resolve(true);
                     return;
                 }
 
-                const combined = (stdout || '') + (stderr || '');
                 const match = combined.match(/ERROR:\s+The following required tools were not found:\s*(.+)/i);
                 const missingList = match ? match[1].trim() : '';
                 const detail = missingList
@@ -233,8 +253,14 @@ async function checkToolsOrPrompt(idfPath, pythonCmd) {
                     const pipOk = await checkPip(freshPython);
                     if (!pipOk) { clearBusy(); resolve(false); return; }
 
+                    // #FIX(1.85.0): Branch on configured shell — buildCmd() joins parts
+                    // with " && " for cmd.exe, which cannot parse PowerShell's
+                    // `$env:IDF_PATH=...` syntax. Emit `set "IDF_PATH=..."` for cmd.exe.
+                    const idfSetCmd = getUserShell().toLowerCase().includes('cmd')
+                        ? `set "IDF_PATH=${idfPath}"`
+                        : `$env:IDF_PATH=${q(idfPath)}`;
                     const parts = IS_WIN
-                        ? [`$env:IDF_PATH=${q(idfPath)}`, `${freshPython} ${q(idfToolsPy)} install`,
+                        ? [idfSetCmd, `${freshPython} ${q(idfToolsPy)} install`,
                            ...(fs.existsSync(reqTxt) ? [`${freshPython} -m pip install -r ${q(reqTxt)}`] : [])]
                         : [`export IDF_PATH=${q(idfPath)}`, `${freshPython} ${q(idfToolsPy)} install`,
                            ...(fs.existsSync(reqTxt) ? [`${freshPython} -m pip install -r ${q(reqTxt)}`] : [])];
@@ -274,25 +300,59 @@ function getLittlefsgenScript() {
 }
 
 async function checkAndInstallTools(silent = true) {
+    // #FIX: Skip if tools were already verified in this session
+    if (getToolsVerified()) return;
+
     const idfPath = getValidIdfPath();
     if (!idfPath) return;
 
     const idfToolsPy = path.join(idfPath, 'tools', 'idf_tools.py');
-    if (!fs.existsSync(idfToolsPy)) return;
+    if (!fs.existsSync(idfToolsPy)) { setToolsVerified(true); return; }
 
     const pythonCmd = await getPythonCmd(false, silent);
     if (!pythonCmd) return;
 
+    // #FIX: Strip shell quotes from pythonCmd for execFile — cp.execFile()
+    // executes the binary directly (no shell), so surrounding quotes are
+    // treated as part of the filename and the call fails silently.
+    const pyExec = pythonCmd.replace(/^& /, '').replace(/^"|"$/g, '').replace(/^'|'$/g, '');
+
     return new Promise(resolve => {
-        cp.exec(
-            `${toExecCmd(pythonCmd)} "${idfToolsPy}" check`,
+        cp.execFile(
+            pyExec, [idfToolsPy, 'check'],
             { env: { ...process.env, IDF_PATH: idfPath } },
             async (err, stdout, stderr) => {
-                const toolsMissing = err || (stderr && stderr.includes('ERROR:'));
-                if (toolsMissing) {
-                    const combined = (stdout || '') + (stderr || '');
+                // #FIX: Only treat as "tools missing" if stderr contains the specific
+                // ERROR message from idf_tools.py. A non-zero exit code alone can be
+                // triggered by warnings, deprecation notices, or other non-critical
+                // output. The actual "tools not found" condition is always accompanied
+                // by an ERROR line in stderr/stdout.
+                const combined = (stdout || '') + (stderr || '');
+                const hasToolError = combined.match(/ERROR:\s+The following required tools were not found:/i);
+                // #FIX(1.85.0): If idf_tools.py failed to spawn (python ENOENT, import
+                // error, etc.), `err` is truthy but `hasToolError` is null — previously
+                // this fell through to the `else` branch which calls setToolsVerified(true),
+                // treating a crash as "tools verified OK". Mark verified=false and
+                // resolve without prompting so the caller can retry later.
+                if (err && !hasToolError) {
+                    log('[checkAndInstallTools] idf_tools.py check failed: ' + (err.message || err));
+                    setToolsVerified(false);
+                    resolve();
+                    return;
+                }
+                if (hasToolError) {
                     const match = combined.match(/ERROR:\s+The following required tools were not found:\s*(.+)/i);
                     const missingList = match ? match[1].trim() : '';
+
+                    if (silent) {
+                        // In silent mode (startup), just log and set verified — don't spam
+                        // the user with a dialog every time VS Code starts.
+                        log(`[checkAndInstallTools] Tools missing (silent): ${missingList || 'unknown'}`);
+                        setToolsVerified(false);
+                        resolve();
+                        return;
+                    }
+
                     const msg = missingList
                         ? `ESP8266-IDF: Required build tools not found (${missingList}). Install now?`
                         : 'ESP8266-IDF: Required build tools are not installed. Install now?';
@@ -310,8 +370,14 @@ async function checkAndInstallTools(silent = true) {
                         const marker = buildMarkerCmd(markerFile);
 
                         const reqTxt = path.join(idfPath, 'requirements.txt');
+                        // #FIX(1.85.0): Branch on configured shell — buildCmd() joins parts
+                        // with " && " for cmd.exe, which cannot parse PowerShell's
+                        // `$env:IDF_PATH=...` syntax. Emit `set "IDF_PATH=..."` for cmd.exe.
+                        const idfSetCmd = getUserShell().toLowerCase().includes('cmd')
+                            ? `set "IDF_PATH=${idfPath}"`
+                            : `$env:IDF_PATH=${q(idfPath)}`;
                         const parts = IS_WIN
-                            ? [`$env:IDF_PATH=${q(idfPath)}`, `${pythonCmd} ${q(idfToolsPy)} install`,
+                            ? [idfSetCmd, `${pythonCmd} ${q(idfToolsPy)} install`,
                                ...(fs.existsSync(reqTxt) ? [`${pythonCmd} -m pip install -r ${q(reqTxt)}`] : [])]
                             : [`export IDF_PATH=${q(idfPath)}`, `${pythonCmd} ${q(idfToolsPy)} install`,
                                ...(fs.existsSync(reqTxt) ? [`${pythonCmd} -m pip install -r ${q(reqTxt)}`] : [])];
@@ -331,15 +397,26 @@ async function checkAndInstallTools(silent = true) {
                         }).catch(e => { clearBusy(); log(`Install Tools error: ${e?.message || e}`); });
                     }
                 } else {
+                    // #FIX: Tools are present — set verified flag so we don't re-check
+                    // on every command. Previously this was missing, causing the startup
+                    // check to run idf_tools.py on every command even when tools were OK.
+                    setToolsVerified(true);
+                    log('[checkAndInstallTools] Build tools verified OK');
+
                     const checkDepsPy = path.join(idfPath, 'tools', 'check_python_dependencies.py');
                     const reqTxt2     = path.join(idfPath, 'requirements.txt');
                     if (fs.existsSync(checkDepsPy)) {
                         const pyExec  = pythonCmd.replace(/^& /, '').replace(/^"|"$/g, '').replace(/^'|'$/g, '');
-                        cp.exec(
-                            `"${pyExec}" "${checkDepsPy}"`,
+                        cp.execFile(
+                            pyExec, [checkDepsPy],
                             { env: { ...process.env, IDF_PATH: idfPath } },
                             async (depErr) => {
                                 if (depErr) {
+                                    if (silent) {
+                                        log('[checkAndInstallTools] Python requirements not satisfied (silent)');
+                                        resolve();
+                                        return;
+                                    }
                                     const ans = await vscode.window.showWarningMessage(
                                         'ESP8266-IDF: Python requirements not satisfied. Install now?',
                                         'Install', 'Skip'
@@ -360,6 +437,8 @@ async function checkAndInstallTools(silent = true) {
                                             }
                                         }).catch(e => { clearBusy(); log(`Install Requirements error: ${e?.message || e}`); });
                                     }
+                                } else {
+                                    log('[checkAndInstallTools] Python requirements verified OK');
                                 }
                                 resolve();
                             }

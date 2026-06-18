@@ -40,7 +40,6 @@ function createStatusBar(ctx) {
 
     // Monitor toggle button — priority 102
     const _statusBarMonitor = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 102);
-    refreshMonitorButton();
     ctx.subscriptions.push(_statusBarMonitor);
 
     // Menuconfig button — priority 101
@@ -68,6 +67,11 @@ function createStatusBar(ctx) {
         clean: _statusBarClean,
         menuconfig: _statusBarMenuconfig,
     });
+
+    // #FIX(1.85.0): refreshMonitorButton() must run AFTER _setStatusBarItems()
+    // populates helpers' module-level reference — otherwise getStatusBarMonitor()
+    // returns null and the button is never shown on startup.
+    refreshMonitorButton();
 
     refreshStatusBar();
 }

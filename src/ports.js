@@ -4,6 +4,7 @@ const { vscode, path, fs, cp,
         IS_WIN, IS_MAC, IS_LINUX,
         cfg, setCfg, getPortCache, setPortCache,
         checkBusy,
+        PORT_NAME_REGEX,
 } = require('./helpers');
 
 async function detectPorts() {
@@ -120,7 +121,7 @@ async function cmdSelectPort() {
             value: cfg('comPort') || '',
             validateInput: text => {
                 if (!text) return 'Port cannot be empty';
-                if (!/^[a-zA-Z0-9./\\_-]+$/.test(text)) return 'Invalid characters in port name';
+                if (!PORT_NAME_REGEX.test(text)) return 'Invalid characters in port name';
                 return null;
             }
         });

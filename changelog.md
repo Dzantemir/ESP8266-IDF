@@ -1,403 +1,158 @@
-# ESP8266-IDF — Changelog
+# Changelog
 
-## 1.83.0
-
-### Features
-- **Partition bin links: cross-platform CMake paths** — Bin file paths in `esptool_py_flash_project_args()` now use `${CMAKE_CURRENT_SOURCE_DIR}/filename.bin` instead of absolute filesystem paths (e.g. `d:/path/to/file.bin`). This ensures CMakeLists.txt works correctly on Windows, Linux, and macOS.
-
-### Improvements
-- **Auto-copy bin files to project** — When linking a `.bin` file that is outside the project directory, the extension automatically copies it to the project root. This guarantees that `${CMAKE_CURRENT_SOURCE_DIR}/` paths always resolve correctly.
-- **Name collision handling** — If a file with the same name already exists in the project root, the extension offers options: overwrite, keep existing, or auto-rename with a numeric suffix.
-- **Migration of old absolute paths** — When opening a project that has old-style absolute paths in the partition bin links block, the extension automatically converts them to `${CMAKE_CURRENT_SOURCE_DIR}/` format if the file is inside the project directory.
-- **CMake path resolution for file operations** — All file size validation and stat operations now correctly resolve `${CMAKE_CURRENT_SOURCE_DIR}` to the project root directory.
-
----
-
-## 1.82.0
+## 1.85.1
 
 ### Bug Fixes
-- **Root CMake Editor: post-project() content no longer deleted on save** — Previously, any CMake code after `project()` (e.g. partition bin links, `if()` blocks, `esptool_py_flash_project_args()` calls) was silently removed when saving from the root CMake Editor. The editor now preserves all content after `project()` via a new "Custom CMake Code (postamble)" section.
-- **Root CMake Editor: safety check for all root formData fields** — The init function now ensures all expected fields exist for root mode (not just component mode), preventing `undefined` errors.
+
+**Critical:**
+- **helpers.js**: Fixed `buildIdfEnvPrefix()` cmd.exe branch — a stray double-quote after `2^>nul` inside the `for /f in('...')` clause broke cmd.exe parsing, preventing `idf_tools.py export` environment variables from being set. Users with `shellPath = cmd.exe` could not build at all because IDF_PATH and tool paths were never applied to the terminal session
+- **helpers.js**: Fixed `buildEnvSetCmd()` always emitting PowerShell syntax (`$env:KEY=value`) on Windows regardless of the configured shell. cmd.exe users would get broken environment variable commands. Now branches on `shellPath` like `buildIdfEnvPrefix()` and `pipInstallReqsParts()` already do
+
+**High:**
+- **helpers.js**: Fixed `q()` path quoting for cmd.exe — trailing backslashes in paths (e.g. `C:\ESP\`) were not escaped before the closing quote, causing cmd.exe to interpret `\"` as an escaped quote rather than a backslash before the string terminator. The quote would remain unclosed, breaking any command using such paths
+- **python.js**: Replaced `cp.exec()` with `cp.execFile()` in `checkPythonDeps()` and `checkPip()` — consistent with the shell-injection fix applied to `otaFlash.js`/`idfRunner.js` in v1.85.0. String interpolation into `cp.exec()` allows shell metacharacters in Python/SDK paths to be interpreted by the shell; `cp.execFile()` bypasses the shell entirely
+
+**Medium:**
+- **settingsEditor.js**: Added `</script`-escape to `{{INITIAL_SETTINGS}}` template replacement — consistent with the `_JSON` suffixed placeholder security model introduced in v1.84.0. Without this, a settings value containing `</script>` would break the webview's `<script>` block
+- **flash.js**: Fixed duplicate `watchCommandDone()` call for chained commands (e.g. Flash & Monitor) — the second call for the same marker file polled every 400ms for up to 30 minutes after the first call found and deleted the marker, leaking a polling interval. Now reuses the same Promise reference
+- **flash.js**: Fixed `preFlashAction='erase'` only applying to the full `flash` command — now applies to all flash subtypes (app-flash, bootloader-flash, partition_table-flash) as the setting description implies
+
+## 1.85.0
+
+### Bug Fixes
+
+**Critical:**
+- **flash.js**: Fixed a regression introduced by the `runFlash` race-window fix where pressing Flash / Flash & Monitor / Monitor / Erase Flash would show `"ESP > flash_monitor is running. Wait for it to finish."` even though nothing was actually running. `runFlash` now acquires the busy lock immediately (to close the race), but `runIdf` was rejecting the call via its own `checkBusy()` guard — seeing its own caller's lock and bailing out, leaving the busy state stuck forever. Added an `_alreadyBusy` parameter to `runIdf`: when `runFlash` calls it, the guard is skipped (the lock is already held and `setBusy` just refreshes the name to the more specific terminal title)
+- **extension.js**: Fixed `cmdFlashFsImage` releasing the busy lock while the filesystem image was still being written to flash — `watchCommandDone(...).then().catch()` was neither `await`ed nor `return`ed, so the `finally` block ran synchronously and called `clearBusy()` before esptool finished. This allowed concurrent Build/Erase/Flash commands to collide on the serial port. Now the watch promise is properly awaited
+- **cmakeEditor.js + cmake-editor.html**: Fixed auto-save of dirty CMake editor panels before build being a no-op — the host posted `requestSave` to the webview, but the HTML had no handler for it, so the 3-second timeout always fired and unsaved CMakeLists.txt edits were silently ignored at build time. Added a `requestSave` message handler in `cmake-editor.html` that invokes the existing `save()` function
+- **packaging**: Fixed version mismatch between `package.json` (1.84.3) and the embedded `extension.vsixmanifest` (1.84.0) — the .vsix was not re-packaged with `vsce package` after the version bump. Also fixed the `changelog.md` asset path case mismatch (manifest referenced lowercase `changelog.md` while the file on disk was `CHANGELOG.md`), which made the Changelog tab empty on case-sensitive filesystems (Linux)
+
+**High:**
+- **statusBar.js**: Fixed the Monitor status-bar button being invisible on startup — `refreshMonitorButton()` was called before `_setStatusBarItems(...)` populated the module-level reference, so it returned early and never called `.show()`. The button only appeared after the user started/stopped a monitor. Now the call order is correct
+- **flash.js**: Fixed `runIdf` clearing the busy lock prematurely when `checkToolsOrPrompt` launched a background tool install — the install's own completion handler is now responsible for clearing the lock
+- **flash.js**: Fixed "Flash & Monitor" silently dropping the monitor step when a build was required first — both branches of `postBuildAction = isMonitor ? 'flash' : 'flash'` were identical and the build path ignored `chainArgs`. Now the original action is preserved across the build→flash chain
+- **extension.js**: Fixed leaked TreeView event-listener disposables — `onDidCollapseElement`/`onDidExpandElement`/`onDidChangeCheckboxState` return values were dropped instead of being pushed to `ctx.subscriptions`, causing duplicate handlers and a checkbox write-queue that kept firing after deactivation
+- **helpers.js**: Fixed `buildIdfEnvPrefix()` and `buildMarkerCmd()` always emitting PowerShell syntax on Windows even when the user configured `cmd.exe` as the shell — the terminal received `$env:IDF_PATH=...` / `; if ($LASTEXITCODE ...)` which cmd.exe cannot parse, so `IDF_PATH` was never set and the marker file was never written, hanging `watchCommandDone` for 30 minutes. Now cmd.exe-compatible variants are emitted
+- **components.js**: Fixed `readExcludedComponentsFromText` silently dropping component exclusions for multi-line `set(EXCLUDE_COMPONENTS ...)` forms — the trailing `\s` in the regex required a whitespace character immediately after the name, so `set(EXCLUDE_COMPONENTS\n  foo\n  bar)` was not detected. Changed to `\b`
+- **python.js**: Fixed `pipInstallReqsParts` unconditionally emitting PowerShell `$env:IDF_PATH=...` on Windows, breaking Python-requirements installation for cmd.exe users. Now branches on the configured shell
+- **python.js**: Fixed `checkPip` permanently locking the busy state if terminal creation threw — `setBusy('Install pip')` was called before `getTerm(...)` with no `try/finally`, and the function is invoked fire-and-forget, so the exception was swallowed but the lock remained. Now wrapped in `try/finally`
+
+**Medium:**
+- **flash.js**: Fixed `runWithPostFlash` being called without `commandKey` (ignoring per-command `postFlashAppAction`/`postFlashBootloaderAction`/`postFlashPartitionAction` settings) and without `await` (potential unhandled rejection) in the build→flash path
+- **flash.js**: Fixed `preFlashAction='erase'` being ignored for the direct `esp.flash` command — the `!commandKey` guard was always false because `commandKey='Flash'`
+- **flash.js**: Fixed `esp.monitorRunning` context key and the Monitor status-bar button getting stuck in the "running" state after `flash_monitor` — the `isMonitorCmd` check only inspected `finalArgs`, but for chained commands the monitor lives in `chainArgs`
+- **flash.js**: Fixed `chainTimer` (`setInterval`) leaking for up to 30 minutes when the first command in a chain failed and the chain marker was never written
+- **flash.js**: Fixed `runFlash` not calling `setBusy()` before its initial `await`s, leaving a race window between `checkBusy()` and the lock being set
+- **idfRunner.js**: Fixed `checkToolsOrPrompt`/`checkAndInstallTools` treating a failed `idf_tools.py` spawn (e.g. python ENOENT) as "tools verified OK" — the `err` argument from `cp.execFile` was ignored, so any non-"tools missing" failure marked tools as verified and proceeded to a confusing build failure
+- **idfRunner.js**: Fixed PowerShell `buildCmd` joining install steps with `;` (which does not check `$LASTEXITCODE`) instead of `; if ($LASTEXITCODE -eq 0) { ... }`, allowing a failed `idf_tools.py install` to be masked by a successful `pip install`
+- **cmakeEditor.js**: Fixed `onDidReceiveMessage` handler leaking on every 3-second auto-save timeout — the handler is now disposed in the timeout callback
+- **otaFlash.js**: Fixed `cmdOtaErase` "active slot" detection — the regex expected `Active slot: OTA_N` in `otatool.py read_otadata` output, but that command prints raw otadata seq/crc fields, so the safety warning against erasing the active boot slot was dead code. Now parses the otadata seq values to determine the active slot
+- **otaFlash.js**: Fixed contradictory OTA-mode guidance — the error hint told users the device must be in run mode, while the confirmation dialog correctly required download mode. OTA via `otatool.py` requires download mode; the misleading hint was corrected
+- **components.js**: Fixed comment stripping corrupting multi-line `set(EXCLUDE_COMPONENTS ...)` values — comments are now stripped per original line before joining
+- **components.js**: Fixed `writeExcludedComponents` silently dropping the exclusion list when CMakeLists.txt had neither the `include($ENV{IDF_PATH}...project.cmake)` anchor nor a `project(` line — the old `set(...)` was already removed. Now falls back to appending at EOF
+- **components.js**: Hardened `cmdEditComponent` against webview-supplied `compDir` path traversal — the component directory is now always re-derived server-side from the project root and original component name
+- **extension.js / helpers.js**: Fixed `_autoGenTimer`, the 500 ms startup `setTimeout`, and `_buildStatusTimer` not being cleared in `deactivate()` — they could fire on a deactivated extension. Now cleared on deactivation
+- **extension.js**: Fixed `onDidChangeWorkspaceFolders` auto-falling back to `current[0]` without validating it is an ESP8266-IDF project — now prefers the first remaining folder that passes `_checkEspProject`
+
+**Low:**
+- **helpers.js**: Fixed `ensureVersionTxt` hardcoding `v3.4` instead of using the existing `getSdkVersion(idfPath)` detection chain, which overwrote `version.txt` with the wrong value for users on v3.3 or v3.4-rc1
+- **extension.js**: Removed unused `getProvider`/`getMonitorRunning` imports
+- **package.json**: Removed dead config keys `esp8266-idf.monitorBaud`, `esp8266-idf.preFlashAppAction`, `esp8266-idf.preFlashBootloaderAction`, `esp8266-idf.preFlashPartitionAction` that were declared but never read by any source file
+- **components.js**: Hardened webview JSON injection — `{{AVAILABLE_COMPONENTS}}`/`{{PROJECT_ROOT}}` placeholders now escape `</` and `"` to prevent XSS via component folder names containing `</script>`
+- **partitionEditor.js**: Added missing `localResourceRoots` restriction (the other editors already restrict to the media directory)
+- **partitionEditor.js / cmakeEditor.js**: Fixed `String.replace('{{...}}', data)` interpreting `$&`/`` $` ``/`$'` specially in JSON user data, corrupting the HTML. Now uses function replacements
+- **cmakeEditor.js / settingsEditor.js / newProjectEditor.js**: Removed unreachable dead message handlers (`pickComponents`, `refreshSettings`, `pickExcludedComponents`) that the webviews never post
+- **cmake-editor.html**: Fixed duplicate `cmakePreview` element ID across the root/component form templates
+
+## 1.84.3
 
 ### Features
-- **New: "Custom CMake Code (postamble)" section in root CMake Editor** — A collapsible textarea section for editing CMake code that appears after `project()` in root CMakeLists.txt. This includes partition bin links, `if(CONFIG_...)` blocks, and any other custom CMake commands. The section is collapsed by default.
-- **New: Postamble syntax highlighting in CMake Preview** — The root CMake preview now renders post-project content with syntax highlighting.
 
-### Improvements
-- More robust `parseCmakeRoot()` — now uses balanced parenthesis matching to find the end of `project()` instead of a simple regex, correctly handling project names with spaces or additional arguments.
-- `generateCmakeRoot()` — now uses `postambleBlock` (all content after `project()`) with fallback to the legacy `partitionBinLinksBlock` for backward compatibility.
+- **helpers.js**: Auto-open the source file containing `app_main()` when switching project folder — `app_main` is the universal entry point for ESP-IDF / ESP8266 RTOS SDK. Search order: (1) parse `main/CMakeLists.txt` SRCS and check each file for `app_main`, (2) scan `main/` for any `.c`/`.cpp` containing `app_main`, (3) fallback to first SRCS file, then `main/main.c`. Does not trigger on startup (restoring saved root)
+- **extension.js**: Project validation in "Select Project" dialog — folders are now checked for ESP8266-IDF project markers and displayed with visual indicators: ✅ full match (CMakeLists.txt + main/CMakeLists.txt or components/*/CMakeLists.txt), ⚠️ partial (only root CMakeLists.txt), ❌ none (no CMakeLists.txt). Selecting a non-IDF folder shows a confirmation warning before proceeding
 
----
+### Bug Fixes
 
-## [1.81.0]
-- Fix (CRITICAL): **CMake Editor crash — "VARIABLE is not defined"** — `${VARIABLE}` and `${COMPONENT_REQUIRES}` placeholder text inside JavaScript template literals was interpreted as variable interpolation instead of literal CMake variable syntax, causing a ReferenceError that prevented the editor from loading (#51)
-- Fix: Removed dead duplicate `postMessage` calls — backend was sending both old-format (`addFiles`, `addFolders`, `setComponents`, `scanResult`) and new-format messages, but the HTML webview only handles new-format messages (`setPickedFiles`, `setPickedComponents`, `setScannedFiles`). Removed the dead old-format sends.
-- Fix: Removed unused `readExcludedComponents` import from `cmakeEditor.js` (replaced by `readExcludedComponentsFromText` in the same module)
-- Cleanup: Simplified `pickComponents` message handler — removed redundant dual-format field/type conversion logic
-- Cleanup: Removed redundant compatibility comments in `pickFiles`, `pickFolder`, `scanDirectory` handlers
+- **flash.js + cmakeEditor.js**: Auto-save dirty CMake editor panels before build — if the user edited CMakeLists.txt in the webview but didn't click Save, the build would use stale data from disk. Now `saveAllDirtyCmakePanels()` is called before `saveAll()` in `runIdf`, ensuring the on-disk file always matches the webview state when a build starts
+- **treeProvider.js**: Removed SDK version display from sidebar — the version shown was always "v3.4" (hardcoded default) and provided no useful information to the user
+- **helpers.js**: Fixed terminal launch failure when all workspace folders are missing — added `os.homedir()` as final fallback in `_resolveTermCwd()`, guaranteeing the terminal always gets a valid CWD
 
-## [1.80.0]
-- Feature: **CMake Editor — Variable Reference Tags** — `${VARIABLE}` references in REQUIRES/PRIV_REQUIRES are now displayed as distinctive orange tags with a 🔗 link icon
-  - Orange visual style clearly distinguishes variable references from literal component names (grey tags)
-  - Hover tooltip: "Variable reference — edit in Custom CMake preamble"
-  - Removable with ✕ button (same as regular tags)
-  - Variable references detected automatically via `${...}` pattern matching
-- Feature: **CMake Editor — Custom CMake Code (preamble) section** — new collapsible section for editing CMake code that runs before `idf_component_register()`
-  - Collapsible section with 📝 icon, collapsed by default, shows "(empty)" when preamble is empty
-  - Monospace textarea for editing `if()/set()/endif()` conditional blocks, comments, and variable definitions
-  - Placeholder example shows conditional `COMPONENT_REQUIRES` pattern
-  - Preamble code is included in CMake preview with syntax highlighting (keywords, variables, comments)
-  - Changes to preamble instantly update the live CMake preview
-- Feature: **CMake Editor — Variable reference warning** — when `${...}` variable references exist in REQUIRES/PRIV_REQUIRES, a warning banner appears in the preamble section explaining that variable refs cannot be resolved by the tag editor and must be edited in the preamble
+## 1.84.2
 
-## [1.79.0]
-- Fix: **Flash File System — smart filesystem type filtering** — the "Flash File System" command now checks the project's partition table CSV and only shows filesystem types (SPIFFS/FATFS/LittleFS) that actually have matching partitions, instead of showing all 3 options unconditionally (#49)
-  - If only one filesystem type has partitions → flashes it directly (no menu)
-  - If no filesystem partitions found → shows error with "Open Partition Editor" button
-  - If multiple types have partitions → shows only those, with partition names as detail
-- Fix: **CMake Editor — preserve preamble block** — all CMake code before `idf_component_register()` (such as `if()/set()/endif()` conditional blocks, comments, variable definitions) is now preserved verbatim when saving (#50)
-  - Previously, `if(CONFIG_... OR CONFIG_...)\n  set(COMPONENT_REQUIRES sd_spi_driver)\nendif()` would be silently deleted on save
-  - Now the entire preamble is stored in `preambleBlock` and prepended to the generated output
-  - Works for both Modern (`idf_component_register`) and Legacy (`set(COMPONENT_*) + register_component()`) formats
-- Feature: **CMake Editor — detect variable references** — `${VARIABLE}` references in REQUIRES/PRIV_REQUIRES are now detected and flagged via `hasVariableRefs` metadata, enabling future UI warnings about conditional logic
+### Bug Fixes
 
-## [1.78.0]
-- Feature: **CMake style selector** for New Project and New Component — choose between Modern (`idf_component_register`) and Legacy (`register_component`) format
-  - Header bar with Format dropdown and MODERN/LEGACY badge (matches CMake Editor style)
-  - Default: Modern (ESP-IDF v4.x/v5.x)
-  - Legacy option for ESP8266 RTOS SDK v3.x compatibility
-  - Live preview updates when switching format
-  - Generated `CMakeLists.txt` matches selected format
-- Fix (CRITICAL): `--before`/`--after` esptool options were passed to `idf.py` flash command — these are esptool-only options and caused "No such option: --before" error on ESP8266 RTOS SDK
-- Fix (CRITICAL): `--before`/`--after` in Flash FS Image (esptool.py) were placed AFTER `write_flash` subcommand instead of BEFORE — caused "Address default_reset must be a number" error
-- Fix: Unused `sdkVal` variable in `extension.js` — now properly used instead of `getSdkconfigValue()`
-- Fix: Missing `checkPythonDeps()` call in `cmdFlashFsImage`
-- Fix: Missing `fs.existsSync` check for HTML template in `partitionEditor.js`
-- Fix: `monitorTermNames` list had 2 outdated names and was missing 'ESP › Erase & Flash & Monitor'
+**Critical:**
+- **helpers.js**: Fixed `ensureVersionTxt` writing "unknown" to `version.txt` — the Python builder (idf.py) requires this file to contain the SDK version (e.g. "v3.4"). If the file is missing or contains invalid content, "v3.4" is now written as the default (the ESP8266 RTOS SDK version this extension is built for). The file is never written with "unknown"
+- **idfRunner.js**: Fixed `checkToolsOrPrompt` and `checkAndInstallTools` always failing when `pythonCmd` contained shell quotes — `cp.execFile()` executes the binary directly without a shell, so quoted paths like `"python3"` or `"C:\Python37\python.exe"` were treated as literal filenames. Now strips surrounding quotes before passing to `execFile`
+- **flash.js**: Fixed race condition in `runIdf` — `setBusy()` was called after multiple `await` operations, allowing a second click to slip through between `checkBusy()` and `setBusy()`. Now `setBusy()` is called immediately after `checkBusy()`, before any async gap. Early returns properly call `clearBusy()`
+- **extension.js**: Fixed double `clearBusy()` in `cmdFlashFsImage` — `clearBusy()` was called both inside the promise callback and in `finally`, causing a redundant second call. Now only `finally` calls `clearBusy()`, with a guard to avoid wiping the monitor's busy state if it was started
+- **helpers.js**: Fixed terminal launch failure when workspace folder is deleted — `getTerm()` created terminals without specifying `cwd`, causing VS Code to default to the first workspace folder. If that folder was deleted from disk, the terminal failed with "Starting directory does not exist". Now `getTerm()` sets `cwd` to the active project root, or the first existing workspace folder as fallback
 
-## [1.77.0]
-- Feature: CMake Editor now supports legacy ESP8266 RTOS SDK format (`set(COMPONENT_SRCS ...)` + `register_component()`) in addition to modern `idf_component_register()` format
-- Feature: CMake Editor auto-detects source files from directory via recursive scanning
-- Improvement: CMake Editor supports folder picker for SRC_DIRS, INCLUDE_DIRS, EXTRA_COMPONENT_DIRS
-- Improvement: CMake Editor blocks saving during build/flash (busy state)
-- Improvement: CMake Editor syncs busy state when panel becomes visible
-- Improvement: Close all webview panels (CMake, New Project, Add/Edit Component, Settings, Partition Editor) when switching project
-- Fix: Active root path validation — warns when selected project folder no longer exists on disk and resets to null
+**Improvements:**
+- **helpers.js**: `getSdkVersion` now has additional fallback methods for non-git SDK installs (folder name parsing, CMakeLists.txt IDF_VERSION defines) so the SDK version is displayed correctly even without a .git directory
 
-## [1.76.0]
-- Feature: Auto-generate IntelliSense config and tasks.json on project open (`autoGenerateOnOpen` setting, default: true)
-  - Only generates files that don't exist yet
-  - c_cpp_properties.json includes Xtensa compiler path detection
-  - tasks.json uses `$esp-idf-gcc` problem matcher and proper shell configuration
-- Feature: `shellPath` setting — manual shell path override (e.g. powershell.exe or /bin/bash)
-- Feature: `useExecutionPolicyBypass` setting — on Windows, use `-ExecutionPolicy Bypass` for PowerShell
-- Improvement: Terminal creation now uses `-NoProfile` flag on Windows PowerShell (faster startup)
-- Improvement: `checkPythonDeps()` runs before every build/flash command — prompts to install missing Python requirements
+## 1.84.1
 
-## [1.75.0]
-- Fix: Partition Editor now detects whether the partition table is **built-in** (Single App / Two OTA) or **Custom**
-  - Built-in mode: shows yellow badge "Factory + Two OTA (built-in)" or "Single factory app (built-in)" with warning that saving will switch to Custom mode
-  - Custom mode: shows green badge "Custom partition table"
-- Fix: Saving a built-in partition table now correctly saves to `CONFIG_PARTITION_TABLE_CUSTOM_FILENAME` (e.g. `partitions.csv`) instead of the SDK's built-in filename (e.g. `partitions_two_ota.csv`)
-- Fix: When saving a built-in table, sdkconfig is automatically updated to switch from "Single App" or "Two OTA" to "Custom partition table CSV" mode, then `reconfigure` runs automatically
-- Fix: Partition Editor now loads CSV from SDK directory when viewing a built-in partition table (was showing empty table)
-- Fix: `$(IDF_PATH)` in `CONFIG_PARTITION_TABLE_FILENAME` is now expanded when loading CSV in Partition Editor
+### Bug Fixes
 
-## [1.74.0]
-- Fix (CRITICAL): `hasOtaPartitions()` could incorrectly return `true` for projects without OTA — `CONFIG_PARTITION_TABLE_FILENAME` often contains `$(IDF_PATH)` which was never expanded, causing CSV path resolution to fail and fall through to the `CONFIG_PARTITION_TABLE_TWO_OTA` shortcut
-- Fix: Added `CONFIG_PARTITION_TABLE_SINGLE_APP=y` early-exit check — explicitly skips all OTA detection for single-app partition tables (default for most examples like hello_world)
-- Fix: New `_resolveCsvPath()` function properly expands `$(IDF_PATH)` and `${IDF_PATH}` variables in partition CSV filenames, then resolves absolute/relative paths correctly
-- Fix: Added detailed logging to `hasOtaPartitions()` — every step logs its result, making OTA detection issues easy to diagnose via Output panel
-- Feature: **Serial port device connectivity check** — before running any OTA command, the extension runs `esptool.py chip_id` to verify a device is actually connected to the selected COM port
-  - If no device responds, shows error with options: "Select Port" (pick a different port) or "Continue Anyway" (skip check)
-  - Prevents cryptic `otatool.py` Python tracebacks when the device is not connected
-- Improvement: OTA "no partitions" error message now suggests "Open Menuconfig" (instead of "Open Partition Editor") and explains how to enable OTA
+**Critical:**
+- **helpers.js**: Fixed `ensureVersionTxt` writing "unknown" to `version.txt` — the Python builder (idf.py) requires this file to contain the SDK version (e.g. "v3.4"). When the SDK was installed from a zip archive (no .git directory), all git-based detection methods failed and "unknown" was written instead of the real version. Now the function tries 5 detection methods in order: (1) `git describe --tags`, (2) `.git/HEAD` symbolic ref, (3) SDK folder name parsing (e.g. `ESP8266_RTOS_SDK-v3.4` → `v3.4`), (4) `CMakeLists.txt` `IDF_VERSION_MAJOR/MINOR/PATCH` defines, (5) `git rev-parse --abbrev-ref HEAD`. If none succeed, the file is NOT written with "unknown" — instead a warning is logged instructing the user to create it manually
+- **helpers.js**: Fixed `getSdkVersion` returning empty string for non-git SDK installs — added the same fallback chain (folder name, CMakeLists.txt) so the SDK version is correctly displayed in the status bar and tree view even when the SDK has no .git directory
+- **idfRunner.js**: Fixed `checkToolsOrPrompt` and `checkAndInstallTools` always failing when `pythonCmd` contained shell quotes — `cp.execFile()` executes the binary directly without a shell, so quoted paths like `"python3"` or `"C:\Python37\python.exe"` were treated as literal filenames. Now strips surrounding quotes before passing to `execFile`, matching the pattern already used for `check_python_dependencies.py`
 
-## [1.73.0]
-- OTA: Added `otaPreflight()` shared pre-flight check for all 4 OTA commands — eliminates ~120 lines of boilerplate duplication
-- OTA: Added build check — if `build/flasher_args.json` doesn't exist, warns "Project has not been built yet. Flash the project first." with a "Build & Flash First" button
-- OTA: Improved error messages — when otatool.py fails, shows helpful hints (device not connected, device not flashed with OTA table, serial port busy) instead of just "exit code N"
-- OTA: Renamed sidebar group "OTA Flash (WiFi)" → "OTA Partition Mgmt (Serial)"
+**Security:**
+- **otaFlash.js**: Fixed shell injection vulnerability in `cmdOtaErase` — the `read_otadata` command used `cp.exec()` with string interpolation allowing shell injection via crafted port names. Replaced with `cp.execFile()` which passes arguments as an array, eliminating the shell injection vector
+- **idfRunner.js**: Fixed shell injection in `checkToolsOrPrompt` and `checkAndInstallTools` — replaced `cp.exec()` with `cp.execFile()` for `idf_tools.py check` and `check_python_dependencies.py` invocations. All three `cp.exec` calls that spawn Python scripts now use the safe `cp.execFile` API
 
-## [1.72.0]
-- Settings Editor: Build After-action changed to `none` / `Flash` (removed `App Flash` — not needed after full build)
-- Settings Editor: Build App After-action changed to `none` / `App Flash` (removed `Flash` — full flash after app-only build is unnecessary)
-- Settings Editor: Changed Before-Flash to "N/A" for Flash App, Flash Bootloader, and Flash Partition — erasing entire flash before partial flash is counterproductive
-- Backend: `runWithPostFlash()` no longer reads `preFlashAppAction`/`preFlashBootloaderAction`/`preFlashPartitionAction` — erase is only applicable to the main Flash command
-- `package.json`: Updated enums for `postBuildAction` (removed `app_flash`), `postBuildAppAction` (now `none`/`app_flash`), `preFlashAppAction`/`preFlashBootloaderAction`/`preFlashPartitionAction` (removed `erase`)
-- Fix: OTA Read Otadata and OTA Erase commands now check for OTA partitions before running — previously crashed with Python traceback on projects without OTA partition table
-- Fix (CRITICAL): `getPartitionCsvFilename()` now reads `CONFIG_PARTITION_TABLE_FILENAME` (not just `CUSTOM_FILENAME`) — built-in OTA partition tables (e.g. `partitions_two_ota.csv`) were never detected
-- Fix: `hasOtaPartitions()` now searches 4 locations: project CSV → SDK built-in CSV → build directory CSV → sdkconfig OTA flag
-- Fix: OTA CSV parser now strips quotes from values (e.g. `"ota_0"`)
-- Fix: All 4 OTA commands now pass `--baud` to otatool.py (was using slow default 115200)
-- Fix: OTA Read Otadata now shows success notification (was silent on success)
-- Rename: Sidebar group "OTA Flash (WiFi)" → "OTA Partition Mgmt (Serial)" (commands operate via serial, not WiFi)
+**Correctness:**
+- **idfRunner.js**: Fixed "Required build tools are not installed" message appearing on every VS Code startup — three root causes: (1) `checkAndInstallTools` did not check `_toolsVerified` before running `idf_tools.py check`, so it re-ran on every startup; (2) when tools were found OK, `setToolsVerified(true)` was never called, so subsequent commands triggered another check; (3) the `toolsMissing` detection used `err || stderr.includes('ERROR:')` which triggered on any non-zero exit code or generic ERROR string (e.g. Python warnings), instead of checking for the specific "The following required tools were not found" message. Now: `checkAndInstallTools` skips if already verified; sets `_toolsVerified = true` when tools are OK; only shows the dialog when the specific missing-tools ERROR is detected; in silent mode (startup), missing tools are logged but don't show a dialog
+- **partitionEditor.js**: Fixed stale sdkconfig cache in `switchToCustomMode` — after writing `CONFIG_PARTITION_TABLE_CUSTOM=y` to sdkconfig, the in-memory cache was not invalidated, causing subsequent `getSdkconfigValue()` calls to return stale data. Now calls `setSdkconfigCache(null)` after the write
+- **helpers.js**: Fixed status bar race condition in `watchBuildResult` — if a new build started within 4 seconds of a previous build completing, the old `setTimeout` timer would overwrite the status bar text. Now stores the timer ID and calls `clearTimeout()` before setting a new timer
+- **python.js**: Fixed `getVersion` Promise that could hang forever — the callback-only `Promise` constructor had no `reject` path. Added a 5-second timeout with `reject()` and `clearTimeout` cleanup in the exec callback
+- **newProjectEditor.js**: Fixed partial project creation on error — if any `mkdirSync`/`writeFileSync` call failed mid-way, a broken partial project was left on disk. Now tracks all created paths and rolls back (deletes files/directories in reverse order) before re-throwing the error
+- **partitionEditor.js**: Fixed `setTimeout` timer leak — the 300ms timer for `applySizeUpdatesOnOpen` was never cleaned up if the panel was disposed before the timer fired. Now stores the timer ID and registers `onDidDispose` to call `clearTimeout`
+- **cmakeEditor.js**: Fixed webview panel leak on creation error — if `createWebviewPanel()` succeeded but `panel.webview.html = ...` threw, the panel was never tracked in `_cmakePanels` and `onDidDispose` was never registered, causing a resource leak. Now wraps both calls in try/catch, disposes the panel on error, and only registers in the Map after both succeed
 
-## [1.71.0]
-- Fix: `onDidChangeWorkspaceFolders` now also closes the "Add Component" panel when the active project changes (was left dangling)
-- Fix: `getSdkconfigChoice` is now properly exported from `helpers.js` (was defined but missing from exports)
-- Fix: Removed unused `quickPickActive` function and export from `components.js`
-- Fix: CSS variable `--btn2-ff` renamed to `--btn2-fg` for consistency with other HTML templates (`partition-editor.html`, `cmake-editor.html`, `new-project.html`)
+**Improvements:**
+- **partitionEditor.js**: Improved `_copyBinToProject` file comparison — replaced unreliable file-size equality check with SHA1 hash comparison. Two different files can have the same size, leading to false "same file" detection and skipped overwrites
+- **settingsEditor.js**: Eliminated duplicated settings defaults — extracted `_getDefaultSettings()` function used by both `cmdSettingsEditor` and the `refreshSettings` handler, reducing 18 duplicated fields to a single source of truth
+- **extension.js**: Improved `cmdFlashFsImage` error handling — replaced awkward `_earlyReturn()` pattern with proper `try/catch/finally`, where `finally` always calls `clearBusy()`. This ensures the busy lock is released even on unexpected errors
+- **treeProvider.js**: Replaced silent `catch {}` in `getChildren` with logged warning — if the `components/` directory is unreadable (e.g. permission denied), the error is now logged to the output channel instead of being silently swallowed
+- **helpers.js + flash.js + extension.js**: Extracted shared `MONITOR_TERM_NAMES` constant — the monitor terminal name list was hardcoded in two places. Now defined once in `helpers.js` and imported where needed, ensuring the lists stay in sync
+- **python.js**: Changed `found()` pip check to fire-and-forget — `await checkPip(cmd)` blocked the return of the Python command. Now uses `checkPip(cmd).catch(() => {})` so the Python command is returned immediately while the pip check runs asynchronously
 
-## [1.70.0]
-- Settings Editor: Removed "Esptool Connection" section (Chip reset before/after flash) from webview — settings remain accessible via VS Code native Settings UI and sidebar tree commands
-- Settings Editor: Removed "Override Flash Configuration" section (Override flash settings, baud, mode, freq, size, compressed upload) from webview — settings remain accessible via VS Code native Settings UI and sidebar tree commands
-- Removed unused CSS styles (`.toggle-switch`, `.conditional-section`, `.sub-label`, `.select`) and JS functions (`setToggle`, `updateFlashConfigVisibility`, `setSelect`, `setToggleUI`, `setSelectUI`) from Settings Editor webview
+## 1.84.0
 
-## [1.69.0]
-- Feature: **Per-command pre/post action settings** — each Build and Flash command now has its own independent "Before" and "After" action configuration
-  - Build: Before (none/clean/fullclean) + After (none/flash/app_flash)
-  - Build App: Before (none/clean/fullclean) + After (none/flash/app_flash)
-  - Build Bootloader: Before (none/clean/fullclean) + After (none/flash_bootloader)
-  - Build Partition Table: Before (none/clean/fullclean) + After (none/flash_partition)
-  - Flash: Before (none/erase) + After (none/monitor)
-  - Flash App: Before (none/erase) + After (none/monitor)
-  - Flash Bootloader: Before (none/erase) + After (none/monitor)
-  - Flash Partition Table: Before (none/erase) + After (none/monitor)
-  - Flash File System: After (none/monitor)
-- Feature: **Redesigned Settings Webview** — compact per-command layout with inline radio buttons for each command
-  - Build tab: per-command Before/After actions + shared Post-Build Analysis (Build only)
-  - Flash tab: per-command Before/After actions + shared Esptool Connection + Override Flash Config
-  - Flash FS tab merged into Flash tab as a command row
-- New configuration settings: `preBuildAppAction`, `postBuildAppAction`, `preBuildBootloaderAction`, `postBuildBootloaderAction`, `preBuildPartitionAction`, `postBuildPartitionAction`, `preFlashAppAction`, `postFlashAppAction`, `preFlashBootloaderAction`, `postFlashBootloaderAction`, `preFlashPartitionAction`, `postFlashPartitionAction`
-- `flash.js`: `runIdf()` and `runWithPostFlash()` now accept `commandKey` parameter for per-command settings lookup
-- `resolvePostBuildFlashAction()` helper maps post-build actions to flash commands (e.g. `flash_bootloader` → `bootloader-flash`)
+### Bug Fixes
 
-## [1.68.0]
-- Improvement: **Separated Build and Flash pre/post action settings** — Build and Flash now have fully independent "Before" and "After" action configurations in the Settings webview
-  - Build tab: Before Build (none/clean/fullclean) + After Build (none/flash/app_flash) + Post-build analysis
-  - Flash tab: Before Flash (none/erase) + After Flash (none/monitor) + Esptool connection + Override flash config
-  - Flash FS tab: After Flash FS (none/monitor)
-  - Each command type uses only its own settings — no shared/merged configuration
+**Critical:**
+- **cmake-editor.html**: Replaced `confirm()` with `vscode.postMessage({command:'confirmRefresh'})` — `confirm()` does not work in VSCode webviews and caused silent failures
+- **cmake-editor.html**: Changed `let cmakeFormat = {{CMAKE_FORMAT}}` to `{{CMAKE_FORMAT_JSON}} || "modern"` — unquoted template substitution caused `ReferenceError` when value was a bare string (e.g. `modern` instead of `"modern"`)
+- **All HTML files**: Replaced unsafe string template patterns (`"{{VAR}}"`, `'{{VAR}}'`) with JSON-injected `{{VAR_JSON}}` templates that use `JSON.stringify()` on the host side — prevents XSS and SyntaxError from values containing quotes/special chars
+- **All HTML files**: Added `window.addEventListener('error', ...)` error catcher script to display user-friendly error panels instead of blank/broken webviews when template substitution fails
+- **All HTML files**: Wrapped `init()` calls in `try/catch` with error display panels — prevents silent crashes on null/undefined template data
 
-## [1.67.0]
-- Feature: **Edit Component Webview** — "Edit Component" from the sidebar now opens a webview editor instead of the old 4-step QuickPick wizard
-  - Pre-populated from existing CMakeLists.txt (name, sources, headers, dependencies)
-  - Component rename with folder rename support
-  - Source files (.c) with inline add/remove + auto-detect from directory
-  - Header file location: `include/` folder, same folder as `.c`, or none (pre-selected)
-  - Component dependencies (REQUIRES) picker with search/filter (pre-populated)
-  - Live CMake preview with syntax highlighting
-  - "RENAMED" badge shown when component name is changed
-- Feature: **Settings Webview Editor** — unified visual settings panel replacing 5 separate QuickPick wizards
-  - Build tab: Before build action, After build action, Post-build analysis checkboxes
-  - Flash tab: Erase before flash, After flash action, Override flash config (baud/mode/freq/size/compression/before/after)
-  - Flash FS tab: After flash filesystem action
-  - All settings displayed and editable in one place with instant save
-- Fix: `esp.editProject` command was calling `cmdCmakeEditorMain()` directly instead of `cmdEditProject()` which has the logic to choose between root and main CMake editor
-- Fix: Removed dead QuickPick-based configure functions from extension.js (moved to SettingsEditor webview)
+**Non-critical:**
+- **cmake-editor.html**: Fixed `pickSingleFile('sdkconfig')` overwriting value on cancel — now checks `msg.cancelled` flag and `files.length`
+- **partition-editor.html**: Fixed undefined CSS variable `--fg` → changed to `--text` (defined in `:root`)
+- **partition-editor.html**: Added `has-error` class application in `validate()` — CSS rule existed but was never triggered
+- **partition-editor.html**: Fixed HTML injection vulnerability in `{{SAFE_FLASH_SIZE}}` and `{{SAFE_FILENAME}}` — now set via `textContent`/`value` from JS instead of inline HTML attributes
+- **settings-editor.html**: Fixed `saveSettings()` `setTimeout` always showing success — now waits for host response (`saveSettingsResult` message) with 5s safety timeout
+- **settings-editor.html**: Added null guard in `applySettingsToUI()` — prevents crash when `settings` is null/undefined
+- **new-project.html**: Fixed copy-paste bug: `msg.type === 'exclude' ? 'excludeComponents' : 'excludeComponents'` → `const field = 'excludeComponents'`
 
-## [1.66.0]
-- Feature: **Auto-add project to workspace** — after creating a new project, the folder is automatically added to the VS Code workspace and set as the active project (no more "Open in Workspace" button prompt)
-- Feature: **New Component webview** — "Add New Component" from the sidebar now opens a webview editor instead of the old QuickPick wizard
-  - Component name with live validation and duplicate check
-  - Source files (.c) with inline add/remove
-  - Header file location: `include/` folder, same folder as `.c`, or none
-  - Component dependencies (REQUIRES) picker with search/filter
-  - Live CMake preview with syntax highlighting
-- Fix: Sidebar "cfg is not defined" error — `treeProvider.js` was missing `cfg` import from `./helpers`
-- Fix: "log is not defined" error on project creation — import was present but stale VSIX builds may not have included it
+### Host-side changes
+- **cmakeEditor.js**: Added `_JSON` template replacements for all string/number variables using `_escJsJson()` (JSON.stringify + `</script` escape)
+- **cmakeEditor.js**: Added `confirmRefresh` message handler — shows VSCode modal dialog and posts `confirmRefreshResult` back to webview
+- **cmakeEditor.js**: Added `cancelled: true` flag to `setPickedFiles` response when file picker is cancelled
+- **cmakeEditor.js**: Sends `saveSettingsResult` back to webview after save (success or failure)
+- **components.js**: Added `_JSON` template replacements for `AVAILABLE_COMPONENTS` and `PROJECT_ROOT`
+- **partitionEditor.js**: Added `_JSON` template replacements for `IS_BUILTIN`, `MODE_LABEL`, `MODE_HINT`, `SAFE_FLASH_SIZE`, `SAFE_FILENAME`
+- **settingsEditor.js**: Added `_JSON` template replacement for `INITIAL_MODE`
+- **newProjectEditor.js**: Added `_JSON` template replacement for `AVAILABLE_COMPONENTS`
 
-## [1.65.0]
-- Feature: **CMake Webview Editor** — visual editor for `CMakeLists.txt` (component, main, root) replacing old menu-based QuickPick wizards
-  - Edit all `idf_component_register()` parameters: SRCS/SRC_DIRS, INCLUDE_DIRS, REQUIRES, EMBED_FILES, etc.
-  - Built-in component picker with search/filter for dependencies and exclusions
-  - Live CMake preview with syntax highlighting
-  - Multiple editors can be open simultaneously (e.g. component + root)
-- Feature: **Create New Project Webview** — replaces old 4-step native wizard with single-page webview editor
-  - Parent folder browser, project name with live validation, header location radio buttons
-  - Excluded components picker, live preview of all files to be generated
-  - "Open in Workspace" button after creation
-- Removed: Old menu-based edit component wizard (4-step QuickPick) — pencil icon now opens CMake webview editor
-- Removed: Old menu-based edit project wizard — replaced by CMake webview editors (root + main)
-- Removed: Old menu-based create project wizard (4-step sequential dialogs) — replaced by webview
-- Removed: Make-style compatibility (`component.mk`, `Makefile` generation) — project is pure CMake only
+## 1.83.8
 
-## [1.22.0]
-- Feature: **Flash File System** — unified command replacing Flash SPIFFS / Flash FATFS / Flash LittleFS (3 → 1)
-  - Auto-detects filesystem type from `CMakeLists.txt` (reads `esptool_py_flash_project_args` block)
-  - Shows auto-detected type with "Continue" / "Choose manually" options
-  - Falls back to manual selection if CMakeLists.txt block not found
-- Removed: **Open Component in Explorer** inline button from sidebar component items (no longer needed)
-- Improvement: VSIX package size reduced from 32 MB to 168 KB — `node_modules` excluded via `.vscodeignore`, `@vscode/vsce` moved to `devDependencies`
-
-## [1.21.0]
-- Feature: **OTA Flash — firmware over WiFi/serial** — 4 new commands using SDK's `otatool.py`:
-  - **OTA Flash** — write firmware .bin to OTA partition slot (ota_0/ota_1) via serial
-  - **OTA Switch** — switch boot partition to ota_0 or ota_1 (device boots from selected slot after reset)
-  - **OTA Read Status** — read OTA data partition from device (shows current boot selection)
-  - **OTA Erase** — erase OTA partition or otadata (reset boot selection or clear slot)
-  - New sidebar group 📡 OTA Flash (WiFi) with all 4 commands
-  - Auto-detects OTA partition layout from CSV; warns if no OTA slots found
-  - Uses `--slot` for ota_0/ota_1 or `--name` for custom partition names
-- Fix: **globalCtx is not defined** error causing empty sidebar — `treeProvider.js` EspGroup constructor used bare `globalCtx` variable instead of `getGlobalCtx()` getter
-- Fix: **Partition Editor showed raw JS** in Flash Size field — `${safeFlashSize === ...}` was not evaluated when HTML extracted to separate file; replaced with `{{FLASH_SIZE_LABEL}}` placeholder
-- Removed: **Set Target** command — ESP8266 has only one target (`esp8266`), `idf.py set-target` is meaningless and destructive (does fullclean + reconfigure)
-
-## [1.19.1]
-- Fix: **Removed Partition Editor encrypted toggle** — ESP8266 does not support flash encryption (that's an ESP32-only feature); removed 🔒/🔓 column and Flags field from CSV output
-- Refactor: **Monolithic extension.js split into 10 focused modules** — helpers, python, ports, statusBar, idfRunner, flash, components, treeProvider, partitionEditor, extension (entry point)
-- Refactor: **Partition Editor HTML extracted to separate file** — `media/partition-editor.html` with `{{PLACEHOLDER}}` template variables; proper syntax highlighting and editability
-
-## [1.19.0]
-- Feature: **SDK version display** — shows git tag/branch or version.txt in sidebar next to SDK path
-- Feature: **Keyboard shortcuts** — Ctrl+Alt+B (Build), Ctrl+Alt+F (Flash), Ctrl+Alt+M (Monitor/Stop), Ctrl+Alt+G (Menuconfig), Ctrl+Alt+E (Erase Flash)
-- Feature: **Set Target** — new `idf.py set-target` command in sidebar (SDK Configure group)
-- Feature: **Open Component in Explorer** — right-click component → open folder in OS file manager
-- Feature: **Build time tracking** — success notification now shows elapsed time (e.g., "completed in 1m 23s")
-- Feature: **Partition Editor clickable CSV filename** — click filename in header to open CSV file
-- Feature: **Python detection progress** — status bar spinner while searching for Python 3.7
-- Improvement: **Busy state blocks sidebar menus** — inline context menu items disabled when commands are running
-- Improvement: **Deduplicated filesystem image builder** — SPIFFS/FATFS/LittleFS share common pre-flight, size selection, and terminal execution code (~210 lines removed)
-- Improvement: **OutputChannel properly disposed** on deactivation (memory leak fix)
-- Improvement: **Temp marker files cleaned up** on deactivation (no more orphaned .tmp files)
-- Improvement: **Terminal and monitor state cleanup** on deactivation
-- Improvement: **SDK version shown** when setting SDK path manually
-- Improvement: **sdkconfig cache invalidated** by filesystem watcher (not just mtime checks)
-- Improvement: **Project structure validation** — warning in sidebar if active folder lacks CMakeLists.txt/sdkconfig
-
-## [1.18.0]
-- Fix (CRITICAL): `_toolsVerified = true` even when install FAILS — now reads marker file content (0=success, 1=failure)
-- Fix (CRITICAL): `cmdStopMonitor` unconditionally called `clearBusy()` — could release lock during build/flash
-- Fix (CRITICAL): Race condition between `clearBusy()` and `runWithPostFlash()` — busy lock now held through the transition
-- Fix (CRITICAL): `_monitorRunning = true` set before command actually starts — moved after `t.sendText()`
-- Fix (CRITICAL): Missing terminal names for app-flash/bootloader-flash + monitor in `cmdStopMonitor`
-- Fix (CRITICAL): Non-unique marker files for SPIFFS/FATFS/LittleFS — stale markers caused false-positive completion; now use unique filenames in `os.tmpdir()`
-- Fix (CRITICAL, Python): `entry.py` operator precedence — `order_ & 0x40 == 0x40` evaluated as `order_ & (0x40 == 0x40)` instead of `(order_ & 0x40) == 0x40`; corrupted LFN reconstruction
-- Fix (CRITICAL, Python): `fatfs_state.py` passed `sectors_count` instead of `clusters_count` to `get_fat_sectors_count()` — wrong FAT type selection and table size
-- Fix (CRITICAL, Python): `--partition_size detect` for non-WL FATFS always raised ValueError — sentinel `-1` now skips validation
-- Fix (CRITICAL, Python): `fs_object.py` used `sector_size` instead of `cluster_size` for file splitting — files consumed `sectors_per_cluster`× more space than needed
-- Fix: `q()` always used PowerShell escaping on Windows — now checks `shellPath` for cmd.exe
-- Fix: `buildCmd()` used `;` on Windows (continues on failure) — now uses `&&` for PowerShell, `;` only for cmd.exe
-- Fix: `picked: true` without `canPickMany` was ignored — replaced with `quickPickActive()` helper
-- Fix: SPIFFS subtype incorrectly mapped to `spiffs/littlefs` — now preserved as original value from CSV
-- Fix: `_panelIsDirty` temporal dead zone — declaration moved before `onDidReceiveMessage` callback
-- Fix: Unknown INCLUDE_DIRS silently defaulted to `'dot'` — now preserves custom paths
-- Fix: Deprecated `onDidAccept` API in `quickPickActive` — replaced with `onDidChangeSelection`
-- Fix: `getSdkconfigValue` read entire file per key call — now cached with mtime invalidation
-- Fix: Stale `root` after async `requireReady()` in `cmdGenerateIntelliSense/cmdGenerateTasks`
-- Fix (Python): `fatfsparse.py` `os.makedirs` without `exist_ok=True` — `FileExistsError` on re-run
-- Fix (Python): `--long-name-support` could never be disabled — added `--no-long-name-support` / `--no_long_name_support`
-- Fix (Python): `spiffsgen.py` `StopIteration` caught in wrong scope — `next()` could raise uncaught
-- Fix (Python): Minimum partition size validation underestimated FAT overhead — now uses estimated `sectors_per_fat`
-- Fix (Python): `fatfs_state.py` boundary warning checked nonsensical condition — now estimates actual cluster count
-- Fix (Python): Debug `print(BootSector)` left in `fatfs_parser.py` — removed
-- Fix (Python): `fatfsgen.py` `root_entry_count` silently capped at 512 — now uses `max()` to allow more entries
-- Fix (Python): `wl_fatfsgen.py` no `move_count` validation — now checks range and handles 0 correctly
-- Fix (Python): `fat.py` no bad-cluster marker detection — now raises `RuntimeError` on bad cluster (0xFF7/0xFFF7)
-- Fix (Python): `cluster.py` no bounds check on FAT12 read — now raises `IndexError` on out-of-bounds
-- Fix (Python): `fatfsparse.py` odd-byte UTF-16 crash — now ensures even byte count before decode
-
-## [1.17.0]
-- Feature: **Menuconfig button in status bar** — quick access to `idf.py menuconfig` from the bottom bar (after Monitor button)
-- Fix: **CONFIG_WL_SECTOR_SIZE parsing** — was incorrectly checked as boolean (`=== 'y'`), now reads the actual numeric value (4096 or 512)
-- Fix: **FATFS partition size auto-adjust** — if partition size from CSV is too small for Wear Levelling, auto-increases to minimum with warning instead of blocking
-- Fix: **FATFS output file naming by WL mode** — `_fatfs.bin` (no WL), `_fatfs_wl_p.bin` (WL performance), `_fatfs_wl_s.bin` (WL safe)
-- Fix: **EXCLUDE_COMPONENTS CMakeLists.txt parsing** — lines starting with `#` are now correctly treated as comments (e.g. `#set(EXCLUDE_COMPONENTS ...)` no longer parsed as active)
-- Fix: **Busy-state locking** — all sidebar and project-modifying actions are now blocked while a terminal command is running:
-  - Project switching / creation / clearing
-  - Component checkbox toggles, add / edit / delete
-  - Flash settings changes (baud, mode, freq, size, compression, before/after flash, monitor baud)
-  - Partition Editor, SPIFFS/FATFS/LittleFS generators
-  - Build/Flash configuration dialogs
-- Fix: **Partition Editor blocks project changes** — cannot switch or create project while editor is open
-- Fix: `esp.clearProject` now also checks busy state
-
-## [1.16.8]
-- Fix: component scanner now correctly includes all SDK components (register_component, set(srcs) patterns) — previously missed mbedtls, freertos, lwip, console, etc.
-
-## [1.16.7]
-- Fix: component scanner now filters out infrastructure components without SRCS (e.g. esptool_py, partition_table, bootloader)
-
-## [1.16.6]
-- Fix: component dependencies list now excludes the component being edited (prevents self-dependency)
-- Rename: "Dependencies (REQUIRES)" → "Dependencies"
-
-## [1.16.5]
-- Fix: EXCLUDE_COMPONENTS now preserves project component exclusions when editing SDK component exclusions
-
-## [1.16.4]
-- Feature: Component selection via QuickPick with checkboxes — scan SDK and project components, mark current selections, option to type custom names
-- Feature: **Edit Project** — EXCLUDE_COMPONENTS selector (SDK components only, project components managed via sidebar checkboxes)
-- Feature: **Create New Project** — EXCLUDE_COMPONENTS selector for new projects
-- Feature: **Add Component / Edit Component** — REQUIRES dependencies selector (SDK + project components)
-- Change: Edit Project / Create New Project now use EXCLUDE_COMPONENTS instead of REQUIRES
-- Fix: EXCLUDE_COMPONENTS preserves project component exclusions when editing SDK component exclusions
-
-## [1.16.3]
-- Feature: Dependencies (REQUIRES) selection now uses QuickPick with checkboxes — scan SDK and project components, mark current deps, option to type custom names
-
-## [1.16.2]
-- Feature: unified console output for all filesystem generators — progress bar, configuration summary, and result line
-- Feature: `fatfsgen.py` / `wl_fatfsgen.py` now show progress bar and configuration (previously silent)
-- Feature: `spiffsgen.py` now shows configuration block and result summary (previously only progress bar)
-
-## [1.16.1]
-- Fix: removed `Flash & Monitor` from post-build action menu (redundant with `postFlashAction: monitor`)
-- Fix: Partition Editor — `spiffs` subtype renamed to `spiffs/littlefs` in dropdown (subtype `0x82` is shared by both filesystems; CSV still saves as `spiffs`)
-
-## [1.16.0]
-- Feature: **Make LittleFS** — pack a data folder into a LittleFS v2 filesystem image (pure Python, no dependencies)
-- Feature: LittleFS image size selection (Auto / presets / manual), parameters from `sdkconfig`
-- Fix: VSIX package cleaned up (992 KB → 150 KB)
-
-## [1.15.0]
-- Feature: initial LittleFS support (pip-based wrapper, superseded by 1.16.0 pure Python)
-
-## [1.14.1]
-- Fix (CRITICAL): FATFS auto-size was forcing 512KB minimum and double-counting FAT sectors — now auto-detects correctly (e.g. 1KB file → 20KB image)
-
-## [1.14.0]
-- Fix (CRITICAL): FATFS — long filename support enabled by default; multiple data corruption and crash bugs fixed in `fatfsgen.py` / `fatfs_utils/` (UTF-16 LE encoding, sector size calculation, SFN validation, fragmented FAT, etc.)
-
-## [1.13.0]
-- Feature: **Make FATFS** — pack a data folder into a FAT filesystem image with wear levelling support
-- Feature: zero-dependency Python scripts (replaced `construct` library with `struct`)
-
-## [1.12.0] – [1.12.2]
-- Feature: component source file selection via QuickPick checkboxes (Add/Edit Component, Edit Project)
-- Fix: `EXCLUDE_COMPONENTS` placement in CMakeLists.txt corrected
-- Fix: Python cache and tools verification improvements
-
-## [1.11.0]
-- Feature: Edit Project — select source files (.c) for compilation via checkboxes
-- Fix: `writeExcludedComponents()` newline handling
-
-## [1.10.0]
-- Feature: component checkboxes in sidebar — enable/disable components for compilation via `EXCLUDE_COMPONENTS`
-
-## [1.9.2] – [1.9.3]
-- Fix (CRITICAL, Linux): bash syntax error broke all commands — fixed `buildIdfEnvPrefix()` separator
-- Fix: Linux/macOS compatibility — Python detection, serial ports (CH340/CH341), path handling, `printf` instead of `echo`
-- Fix (Windows): PowerShell quoting for SPIFFS and Python commands
-- Fix: multiple `spiffsgen.py` bugs (off-by-one errors, floating-point inaccuracy, wrong exception types)
-- Fix: various extension.js bugs (command registration, regex, sdkconfig parsing, hex offset detection)
-
-## [1.8.0] – [1.8.6]
-- Feature: Partition Editor — bin file size auto-sync on open/refresh, size validation on save
-- Feature: Make SPIFFS — image size selection (Auto / presets / manual)
-- Feature: Project Folder — cleared state persists across restarts
-- Fix: Flash — auto-runs `reconfigure` if `flasher_args.json` is missing
-- Fix: IntelliSense — removed `intelliSenseMode` (auto-detected from compile_commands.json)
-
-## [1.7.0] – [1.7.9]
-- Feature: Partition Editor — SIZE field read-only when bin linked, auto-set from file size
-- Feature: Project Folder — clear button, explicit selection only, edit button visibility
-- Fix: Flash+Monitor — monitor runs as separate `idf.py` call; button state tracks actual monitor status
-
-## [1.6.2] – [1.6.8]
-- Feature: Make SPIFFS — replaced `mkspiffs` binary with bundled `spiffsgen.py`; parameters from `sdkconfig`
-- Feature: Partition Editor — Link to bin (for `fat`/`spiffs` subtypes), auto-size from linked bin
-- Fix: Flash+Monitor — erase+flash combined in one call, monitor launched separately
-
-## [1.4.0] – [1.4.4]
-- Feature: Partition Editor — Link to bin column, green indicator for linked files, unsaved changes warning
-- Fix: code cleanup (removed duplicate handlers and dead code)
-
-## [1.3.3]
-- Feature: Partition Editor — added **Link to bin** column; patches `CMakeLists.txt` on save
-
-## [1.1.0] – [1.1.8]
-- Feature: Status bar — Build, Flash, Monitor buttons; Monitor toggle start/stop
-- Feature: Create New Project wizard — include folder and REQUIRES dependencies steps
-- Feature: Sidebar — edit button next to project folder
+### Bug Fixes
+- **littlefsgen.py**: Fixed `LFS.inline_max` auto-detection formula — was `min(block_size//8, 256)`, now correctly uses `min(cache_size, attr_max, block_size//8)` matching LittleFS C source. For ESP8266 (cache_size=64, attr_max=1022, block_size=4096): inline_max=64 (was incorrectly 256)
+- **fatfsgen.py**: Fixed `_generate_partition_from_folder` calling `write_content()` with empty content for empty files — added `if content:` guard consistent with `main()` and `_calculate_min_partition_size`

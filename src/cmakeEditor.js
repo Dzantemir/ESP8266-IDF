@@ -2,10 +2,10 @@
 
 const { vscode, path, fs,
         getActiveRoot, getValidIdfPath, getGlobalCtx,
-        checkBusy, warnNoProject, getGlobalBusyName,
+        checkBusy, warnNoProject, getGlobalBusyName, log,
 } = require('./helpers');
 
-const { scanComponents, pickComponents } = require('./components');
+const { scanComponents, pickComponents, readExcludedComponentsFromText } = require('./components');
 
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  MODULE-LEVEL STATE                                                 ║
@@ -363,7 +363,7 @@ function parseCmakeRoot(content) {
         }
     }
 
-    // Extract EXCLUDE_COMPONENTS from set() command
+    // Extract EXCLUDE_COMPONENTS from set() command — uses shared implementation from components.js
     result.excludeComponents = readExcludedComponentsFromText(normalised);
 
     // Extract EXTRA_COMPONENT_DIRS from set() command
@@ -410,60 +410,6 @@ function parseCmakeRoot(content) {
     }
 
     return result;
-}
-
-/**
- * Read EXCLUDE_COMPONENTS from raw CMakeLists text (not from disk).
- * Reuses the same logic as components.js readExcludedComponents but works on text.
- */
-function readExcludedComponentsFromText(cmakeText) {
-    if (!cmakeText) return [];
-    const lines = cmakeText.split('\n');
-    let setStartLine = -1;
-    let parenDepth = 0;
-    let valueStr = '';
-    for (let i = 0; i < lines.length; i++) {
-        const stripped = lines[i].trim();
-        if (setStartLine === -1) {
-            if (/^set\s*\(\s*EXCLUDE_COMPONENTS\s/i.test(stripped)) {
-                setStartLine = i;
-                for (const ch of stripped) {
-                    if (ch === '(') parenDepth++;
-                    if (ch === ')') parenDepth--;
-                }
-                const valMatch = stripped.match(/^set\s*\(\s*EXCLUDE_COMPONENTS\s+([\s\S]*)/i);
-                if (valMatch) valueStr = valMatch[1];
-                if (parenDepth <= 0) break;
-            }
-        } else {
-            valueStr += ' ' + lines[i];
-            for (const ch of lines[i]) {
-                if (ch === '(') parenDepth++;
-                if (ch === ')') parenDepth--;
-            }
-            if (parenDepth <= 0) break;
-        }
-    }
-    if (setStartLine === -1) return [];
-    const fullMatch = valueStr.match(/^([\s\S]*?)\)/);
-    if (!fullMatch) return [];
-    const valuePart = fullMatch[1].split('\n').map(line => {
-        let inQuote = false;
-        let result = '';
-        for (let ci = 0; ci < line.length; ci++) {
-            const ch = line[ci];
-            if (ch === '"' && (ci === 0 || line[ci - 1] !== '\\')) {
-                inQuote = !inQuote;
-                result += ch;
-            } else if (ch === '#' && !inQuote) {
-                break;
-            } else {
-                result += ch;
-            }
-        }
-        return result;
-    }).join(' ');
-    return valuePart.trim().split(/\s+/).map(c => c.replace(/^"|"$/g, '')).filter(Boolean);
 }
 
 // ╔══════════════════════════════════════════════════════════════════╗
@@ -815,31 +761,37 @@ function _openCmakeEditor(cmakePath, componentName, root, componentDir, isRoot) 
     const title = isRoot
         ? `CMake Editor — ${path.basename(root)} (root)`
         : `CMake Editor — ${componentName}`;
-    const panel = vscode.window.createWebviewPanel(
-        'espCmakeEditor',
-        title,
-        vscode.ViewColumn.One,
-        {
-            enableScripts: true,
-            retainContextWhenHidden: true,
-            localResourceRoots: [
-                vscode.Uri.file(path.join(getGlobalCtx().extensionPath, 'media')),
-            ],
-        }
-    );
+    let panel;
+    try {
+        panel = vscode.window.createWebviewPanel(
+            'espCmakeEditor',
+            title,
+            vscode.ViewColumn.One,
+            {
+                enableScripts: true,
+                retainContextWhenHidden: true,
+                localResourceRoots: [
+                    vscode.Uri.file(path.join(getGlobalCtx().extensionPath, 'media')),
+                ],
+            }
+        );
 
-    // Build HTML
-    panel.webview.html = _getCmakeEditorHtml(
-        componentName,
-        cmakePath,
-        parsed,
-        root,
-        componentDir,
-        allComps,
-        isRoot
-    );
+        // Build HTML
+        panel.webview.html = _getCmakeEditorHtml(
+            componentName,
+            cmakePath,
+            parsed,
+            root,
+            componentDir,
+            allComps,
+            isRoot
+        );
+    } catch (e) {
+        if (panel) try { panel.dispose(); } catch {}
+        throw e;
+    }
 
-    _cmakePanels.set(cmakePath, { panel, isDirty: false });
+    _cmakePanels.set(cmakePath, { panel, isDirty: false, isRoot });
 
     // ─── Message handler ──────────────────────────────────────────────
     panel.webview.onDidReceiveMessage(async msg => {
@@ -920,7 +872,10 @@ function _openCmakeEditor(cmakePath, componentName, root, componentDir, isRoot) 
                     title: `Select files for ${field}`,
                     openLabel: 'Add',
                 });
-                if (!uris || uris.length === 0) return;
+                if (!uris || uris.length === 0) {
+                    panel.webview.postMessage({ command: 'setPickedFiles', target: field, files: [], cancelled: true });
+                    return;
+                }
 
                 // Make paths relative to component dir
                 const relPaths = uris.map(u => {
@@ -974,24 +929,11 @@ function _openCmakeEditor(cmakePath, componentName, root, componentDir, isRoot) 
             return;
         }
 
-        if (msg.command === 'pickComponents') {
-            try {
-                const currentList = (msg.currentValues || []).join(', ');
-                const selected = await pickComponents(currentList, root, componentName);
-                if (selected === undefined) return; // cancelled
-
-                const type = msg.type || 'requires';
-
-                panel.webview.postMessage({
-                    command: 'setPickedComponents',
-                    type: type,
-                    components: selected,
-                });
-            } catch (e) {
-                vscode.window.showErrorMessage(`ESP: Component picker failed: ${e.message}`);
-            }
-            return;
-        }
+        // #FIX(1.85.0): removed dead pickComponents handler — the HTML
+        // (cmake-editor.html) uses its own LOCAL component picker overlay
+        // (function pickComponents opens an in-page overlay, never posts a
+        // 'pickComponents' message to the host), so this branch was
+        // unreachable dead code.
 
         if (msg.command === 'scanDirectory') {
             try {
@@ -1017,6 +959,16 @@ function _openCmakeEditor(cmakePath, componentName, root, componentDir, isRoot) 
                     files: [],
                 });
             }
+            return;
+        }
+
+        if (msg.command === 'confirmRefresh') {
+            const result = await vscode.window.showWarningMessage(
+                'Discard unsaved changes and reload from disk?',
+                { modal: true },
+                'Discard Changes'
+            );
+            panel.webview.postMessage({ command: 'confirmRefreshResult', confirmed: result === 'Discard Changes' });
             return;
         }
 
@@ -1099,6 +1051,66 @@ function notifyBusyState(busy, name) {
     }
 }
 
+/**
+ * Save all dirty CMake editor panels automatically.
+ * Called before build/flash to ensure CMakeLists.txt files are up-to-date.
+ * Requests current form data from each dirty webview and writes to disk.
+ *
+ * @returns {Promise<number>} Number of panels that were saved.
+ */
+async function saveAllDirtyCmakePanels() {
+    let saved = 0;
+    for (const [cmakePath, entry] of _cmakePanels) {
+        if (!entry || !entry.isDirty || !entry.panel) continue;
+        try {
+            await new Promise((resolve, reject) => {
+                // #FIX(1.85.0): The handler is referenced inside the timeout
+                // callback below, so it must be declared before the timeout is
+                // scheduled (TDZ-safe). On timeout we dispose the leaked
+                // message listener before rejecting so repeated failed
+                // auto-saves don't accumulate stale onDidReceiveMessage
+                // listeners on the webview.
+                let handler;
+                const timeout = setTimeout(() => {
+                    // #FIX(1.85.0): dispose the leaked handler before rejecting
+                    // so the listener doesn't survive the failed auto-save.
+                    if (handler) handler.dispose();
+                    reject(new Error('timeout'));
+                }, 3000);
+                handler = entry.panel.webview.onDidReceiveMessage(async msg => {
+                    if (msg.command === 'save') {
+                        clearTimeout(timeout);
+                        handler.dispose(); // #FIX(1.85.0): dispose on success path too
+                        // Write the file using the same logic as the manual save handler
+                        const { isRoot } = entry;
+                        let newContent;
+                        if (isRoot) {
+                            newContent = generateCmakeRoot(msg.data);
+                        } else if (msg.data.cmakeFormat === 'legacy') {
+                            newContent = generateCmakeLegacyRegister(msg.data);
+                        } else {
+                            newContent = generateCmakeComponentRegister(msg.data);
+                        }
+                        fs.writeFileSync(cmakePath, newContent, 'utf8');
+                        entry.isDirty = false;
+                        entry.panel.webview.postMessage({ command: 'saved' });
+                        saved++;
+                        resolve();
+                    }
+                });
+                // Ask the webview to send its current form data as a save
+                entry.panel.webview.postMessage({ command: 'requestSave' });
+            });
+        } catch (e) {
+            log(`[cmakeEditor] Auto-save failed for ${cmakePath}: ${e.message}`);
+        }
+    }
+    if (saved > 0) {
+        log(`[cmakeEditor] Auto-saved ${saved} dirty CMake editor(s) before build`);
+    }
+    return saved;
+}
+
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  HTML TEMPLATE                                                      ║
 // ╚══════════════════════════════════════════════════════════════════╝
@@ -1116,14 +1128,26 @@ function _getCmakeEditorHtml(componentName, cmakePath, parsed, root, componentDi
 
     // Replace placeholders — use _escJs for values inside <script> JS string literals
     // (_escHtml would produce &amp; &quot; etc which are NOT decoded inside <script> tags)
-    html = html.replace(/\{\{COMPONENT_NAME\}\}/g, _escJs(componentName));
-    html = html.replace(/\{\{CMAKE_PATH\}\}/g, _escJs(cmakePath));
-    html = html.replace(/\{\{INITIAL_DATA\}\}/g, _escJsJson(parsed));
-    html = html.replace(/\{\{PROJECT_ROOT\}\}/g, _escJs(root));
-    html = html.replace(/\{\{COMPONENT_DIR\}\}/g, _escJs(componentDir));
-    html = html.replace(/\{\{AVAILABLE_COMPONENTS\}\}/g, _escJsJson(availableComponents));
+    // Legacy templates (kept for backward compat if HTML still references them):
+    // #FIX(1.85.0): Use function replacements so user data containing $&, $`,
+    // $', or $1–$9 is NOT interpreted as a special replacement pattern by
+    // String.replace (which would corrupt the HTML/JS). Only literals that are
+    // known to be safe (e.g. 'true'/'false') keep the plain string form.
+    html = html.replace(/\{\{COMPONENT_NAME\}\}/g, () => _escJs(componentName));
+    html = html.replace(/\{\{CMAKE_PATH\}\}/g, () => _escJs(cmakePath));
+    html = html.replace(/\{\{INITIAL_DATA\}\}/g, () => _escJsJson(parsed));
+    html = html.replace(/\{\{PROJECT_ROOT\}\}/g, () => _escJs(root));
+    html = html.replace(/\{\{COMPONENT_DIR\}\}/g, () => _escJs(componentDir));
+    html = html.replace(/\{\{AVAILABLE_COMPONENTS\}\}/g, () => _escJsJson(availableComponents));
     html = html.replace(/\{\{IS_ROOT\}\}/g, isRoot ? 'true' : 'false');
-    html = html.replace(/\{\{CMAKE_FORMAT\}\}/g, JSON.stringify(parsed.cmakeFormat || 'modern'));
+    html = html.replace(/\{\{CMAKE_FORMAT\}\}/g, () => JSON.stringify(parsed.cmakeFormat || 'modern'));
+    // JSON-safe templates (new — for _JSON suffixed placeholders in HTML):
+    html = html.replace(/\{\{COMPONENT_NAME_JSON\}\}/g, () => _escJsJson(componentName));
+    html = html.replace(/\{\{CMAKE_PATH_JSON\}\}/g, () => _escJsJson(cmakePath));
+    html = html.replace(/\{\{PROJECT_ROOT_JSON\}\}/g, () => _escJsJson(root));
+    html = html.replace(/\{\{COMPONENT_DIR_JSON\}\}/g, () => _escJsJson(componentDir));
+    html = html.replace(/\{\{AVAILABLE_COMPONENTS_JSON\}\}/g, () => _escJsJson(availableComponents));
+    html = html.replace(/\{\{CMAKE_FORMAT_JSON\}\}/g, () => _escJsJson(parsed.cmakeFormat || 'modern'));
 
     // Note: No longer need global </script>/<-- sanitization because
     // _escJsJson() already escapes </script sequences inside the JSON data.
@@ -1425,11 +1449,12 @@ function _resolvePreambleVars(preambleBlock) {
         vars[varName] = values;
     }
 
-    // Parse list(APPEND varName val1 val2 ...) inside if()/endif() blocks
-    const ifBlockRegex = /if\s*\(([\s\S]*?)\)\s*([\s\S]*?)endif\s*\(\s*\)/g;
-    while ((match = ifBlockRegex.exec(normalised)) !== null) {
-        const condition = match[1].trim();
-        const body = match[2];
+    // #FIX: Parse list(APPEND varName ...) inside if()/endif() blocks
+    // Use balanced-depth parser instead of regex — the old regex with non-greedy
+    // [\s\S]*? incorrectly matched the FIRST endif() (inner one for nested blocks)
+    // instead of the matching outer endif().
+    const ifBlocks = _extractBalancedIfBlocks(normalised);
+    for (const { condition, body } of ifBlocks) {
         const listRegex = /list\s*\(\s*APPEND\s+(\w+)\s+([\s\S]*?)\)/g;
         let listMatch;
         while ((listMatch = listRegex.exec(body)) !== null) {
@@ -1447,13 +1472,11 @@ function _resolvePreambleVars(preambleBlock) {
     const globalListRegex = /list\s*\(\s*APPEND\s+(\w+)\s+([\s\S]*?)\)/g;
     while ((match = globalListRegex.exec(normalised)) !== null) {
         const varName = match[1];
-        // Check if this occurrence is inside an if/endif block
+        // Check if this occurrence is inside any if/endif block (using balanced blocks)
         const matchStart = match.index;
         let insideIf = false;
-        const ifCheckRegex = /if\s*\([\s\S]*?\)[\s\S]*?endif\s*\(\s*\)/g;
-        let ifMatch;
-        while ((ifMatch = ifCheckRegex.exec(normalised)) !== null) {
-            if (matchStart >= ifMatch.index && matchStart < ifMatch.index + ifMatch[0].length) {
+        for (const blk of ifBlocks) {
+            if (matchStart >= blk.startIdx && matchStart < blk.startIdx + blk.length) {
                 insideIf = true;
                 break;
             }
@@ -1467,6 +1490,104 @@ function _resolvePreambleVars(preambleBlock) {
     }
 
     return { vars, conditionalVars };
+}
+
+/**
+ * Extract top-level if()/endif() blocks from CMake text using balanced depth
+ * counting. Handles nested if()/endif() correctly — each block's body may
+ * contain inner if()/endif() pairs which are NOT split.
+ *
+ * @param {string} text  CMake text (normalised, no CRLF)
+ * @returns {Array<{condition: string, body: string, startIdx: number, length: number}>}
+ */
+function _extractBalancedIfBlocks(text) {
+    const results = [];
+    const ifRe = /\bif\s*\(/gi;
+
+    let pos = 0;
+    while (pos < text.length) {
+        // Find the next top-level if()
+        ifRe.lastIndex = pos;
+        const ifMatch = ifRe.exec(text);
+        if (!ifMatch) break;
+
+        const ifStart = ifMatch.index;
+
+        // Extract condition: find the matching ) after if(
+        let condDepth = 0;
+        let condEnd = -1;
+        for (let i = ifStart + ifMatch[0].length - 1; i < text.length; i++) {
+            if (text[i] === '(') condDepth++;
+            if (text[i] === ')') {
+                condDepth--;
+                if (condDepth === 0) { condEnd = i; break; }
+            }
+        }
+        if (condEnd === -1) { pos = ifStart + 1; continue; }
+
+        const condition = text.substring(ifStart + ifMatch[0].length, condEnd).trim();
+
+        // Now find the matching endif() at depth 0
+        let depth = 1; // we're inside the if block
+        let searchPos = condEnd + 1;
+        let blockEndIdx = -1; // index of the closing ')' of the matching endif()
+
+        while (searchPos < text.length && depth > 0) {
+            const subIfRe = /\bif\s*\(/gi;
+            const subEndifRe = /\bendif\s*\(/gi;
+
+            subIfRe.lastIndex = searchPos;
+            subEndifRe.lastIndex = searchPos;
+
+            const subIfMatch = subIfRe.exec(text);
+            const subEndifMatch = subEndifRe.exec(text);
+
+            const ifPos = subIfMatch ? subIfMatch.index : Infinity;
+            const endifPos = subEndifMatch ? subEndifMatch.index : Infinity;
+
+            if (ifPos < endifPos) {
+                depth++;
+                // Skip past the if(...) opening parens
+                let d = 0;
+                for (let i = subIfMatch.index + subIfMatch[0].length - 1; i < text.length; i++) {
+                    if (text[i] === '(') d++;
+                    if (text[i] === ')') { d--; if (d === 0) { searchPos = i + 1; break; } }
+                }
+                if (d !== 0) searchPos = text.length;
+            } else if (endifPos < Infinity) {
+                depth--;
+                // Find closing ) of endif(...)
+                let d = 0;
+                let endParenIdx = -1;
+                for (let i = subEndifMatch.index + subEndifMatch[0].length - 1; i < text.length; i++) {
+                    if (text[i] === '(') d++;
+                    if (text[i] === ')') { d--; if (d === 0) { endParenIdx = i; break; } }
+                }
+                if (depth === 0 && endParenIdx !== -1) {
+                    blockEndIdx = endParenIdx;
+                }
+                searchPos = endParenIdx !== -1 ? endParenIdx + 1 : text.length;
+            } else {
+                break; // no more if/endif found
+            }
+        }
+
+        if (depth === 0 && blockEndIdx !== -1) {
+            // Body is between the condition's closing ) and the endif keyword
+            const endifKeywordStart = text.lastIndexOf('endif', blockEndIdx);
+            const bodyText = text.substring(condEnd + 1, endifKeywordStart);
+            results.push({
+                condition,
+                body: bodyText,
+                startIdx: ifStart,
+                length: blockEndIdx + 1 - ifStart,
+            });
+            pos = blockEndIdx + 1;
+        } else {
+            pos = ifStart + 1; // unmatched if, skip
+        }
+    }
+    return results;
 }
 
 /**
@@ -1534,6 +1655,7 @@ module.exports = {
     cmdCmakeEditorRoot,
     closeAllCmakePanels,
     notifyBusyState,
+    saveAllDirtyCmakePanels,
     parseCmakeComponentRegister,
     parseCmakeLegacyRegister,
     parseCmakeRoot,

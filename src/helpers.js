@@ -37,6 +37,7 @@ let _partitionPanel   = null;
 let _pushSdkconfigUpdate = null;
 let _sdkconfigCache   = null;
 let _onBusyChange      = null;   // callback(busy: boolean, name: string)
+let _buildStatusTimer  = null;
 
 // ─── Platform ─────────────────────────────────────────────────────────────────
 const IS_WIN   = os.platform() === 'win32';
@@ -50,6 +51,15 @@ const FLASH_SIZE_MAP = {
     '512K': 524288,  '1M': 1048576,  '2M': 2097152,  '4M': 4194304,
     '8M': 8388608,  '16M': 16777216,
 };
+
+// Shared regex for port name validation (used by flash.js, otaFlash.js, extension.js, ports.js)
+const PORT_NAME_REGEX = /^[a-zA-Z0-9./\\_-]+$/;
+
+// Shared constant: terminal names used for monitor commands
+const MONITOR_TERM_NAMES = [
+    'ESP › Monitor', 'ESP › Flash & Monitor', 'ESP › Erase & Flash & Monitor',
+    'ESP › App flash & Monitor', 'ESP › Bootloader flash & Monitor', 'ESP › Partition table flash & Monitor',
+];
 
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  STATE GETTERS / SETTERS                                           ║
@@ -68,7 +78,102 @@ const getActiveRoot       = () => {
     if (_activeRootWarned) _activeRootWarned = false; // reset when root becomes valid again
     return activeRoot || null;
 };
-const setActiveRoot       = (v) => { activeRoot = v; };
+const setActiveRoot       = (v, autoOpenMain = true) => {
+    const prev = activeRoot;
+    activeRoot = v;
+    // Auto-open the main source file when the project folder changes (not on startup restore)
+    // ESP8266 RTOS SDK does NOT require the file to be named "main.c" — the filename
+    // is defined in main/CMakeLists.txt (SRCS "filename.c"). We parse the CMake file
+    // to find the first registered .c/.cpp source. Fallback: main/main.c
+    if (autoOpenMain && v && v !== prev) {
+        try {
+            const srcFile = _findMainSourceFile(v);
+            if (srcFile) {
+                vscode.workspace.openTextDocument(srcFile).then(doc => {
+                    vscode.window.showTextDocument(doc, { preview: true, preserveFocus: false });
+                    log(`[setActiveRoot] Auto-opened ${srcFile}`);
+                }, err => {
+                    log(`[setActiveRoot] Failed to open ${srcFile}: ${err.message}`);
+                });
+            }
+        } catch (e) {
+            log(`[setActiveRoot] Error finding main source: ${e.message}`);
+        }
+    }
+};
+
+/**
+ * Find the source file containing app_main() in the project.
+ * app_main is the universal entry point for ESP-IDF / ESP8266 RTOS SDK projects.
+ *
+ * Search order:
+ * 1. Parse main/CMakeLists.txt SRCS — check each registered .c/.cpp file for "app_main"
+ * 2. Scan main/ directory for any .c/.cpp file containing "app_main"
+ * 3. Fallback: main/main.c if it exists
+ */
+function _findMainSourceFile(root) {
+    const mainDir = path.join(root, 'main');
+    if (!fs.existsSync(mainDir)) return null;
+
+    const srcExtensions = /\.(c|cpp|cc|cxx)$/i;
+
+    // Helper: check if a file contains "app_main"
+    const hasAppMain = (filePath) => {
+        try {
+            const content = fs.readFileSync(filePath, 'utf8');
+            return /\bapp_main\s*\(/.test(content);
+        } catch { return false; }
+    };
+
+    // 1. Parse CMakeLists.txt SRCS — check each file for app_main
+    const cmakePath = path.join(mainDir, 'CMakeLists.txt');
+    if (fs.existsSync(cmakePath)) {
+        try {
+            const content = fs.readFileSync(cmakePath, 'utf8');
+            const srcsMatch = content.match(/SRCS\s+([^)]+)/i);
+            if (srcsMatch) {
+                const srcs = srcsMatch[1];
+                // Extract ALL quoted .c/.cpp filenames from SRCS
+                const allSrcs = [];
+                const re = /"([^"]+\.(c|cpp|cc|cxx))"/gi;
+                let m;
+                while ((m = re.exec(srcs)) !== null) {
+                    allSrcs.push(m[1]);
+                }
+                // Check each for app_main
+                for (const srcName of allSrcs) {
+                    const srcPath = path.join(mainDir, srcName);
+                    if (fs.existsSync(srcPath) && hasAppMain(srcPath)) return srcPath;
+                }
+                // If none has app_main, return the first SRCS file that exists
+                for (const srcName of allSrcs) {
+                    const srcPath = path.join(mainDir, srcName);
+                    if (fs.existsSync(srcPath)) return srcPath;
+                }
+            }
+        } catch (e) {
+            log(`[findMainSourceFile] Failed to parse ${cmakePath}: ${e.message}`);
+        }
+    }
+
+    // 2. Scan main/ for any .c/.cpp file containing app_main
+    try {
+        const entries = fs.readdirSync(mainDir);
+        for (const entry of entries) {
+            if (!srcExtensions.test(entry)) continue;
+            const fullPath = path.join(mainDir, entry);
+            if (hasAppMain(fullPath)) return fullPath;
+        }
+    } catch (e) {
+        log(`[findMainSourceFile] Failed to scan ${mainDir}: ${e.message}`);
+    }
+
+    // 3. Fallback: main/main.c
+    const fallback = path.join(mainDir, 'main.c');
+    if (fs.existsSync(fallback)) return fallback;
+
+    return null;
+}
 const getGlobalCtx        = () => globalCtx;
 const setGlobalCtx        = (v) => { globalCtx = v; };
 const getOutputChannel    = () => outputChannel;
@@ -128,7 +233,20 @@ function q(p) {
         const shellPath = cfg('shellPath') || '';
         const isCmd = shellPath.toLowerCase().includes('cmd');
         if (isCmd) {
-            return `"${p.replace(/"/g, '""')}"`;
+            // #FIX(1.85.1): In cmd.exe, backslashes before the closing quote
+            // must be escaped. The previous regex `/\\(?=")/g` only matched
+            // backslashes before a quote INSIDE the string, but the closing
+            // quote is added AFTER the replacement. Now we also escape any
+            // trailing backslash that would end up directly before the closing
+            // quote. Double internal quotes as well.
+            let escaped = p.replace(/\\/g, (m, offset) => {
+                // If this backslash is the last char or followed only by backslashes
+                // until end-of-string, it needs doubling (it'll precede the closing ")
+                const tail = p.slice(offset);
+                if (/^\\+$/.test(tail)) return '\\\\';
+                return '\\';
+            }).replace(/"/g, '""');
+            return `"${escaped}"`;
         }
         return `'${p.replace(/'/g, "''")}'`;
     }
@@ -178,6 +296,7 @@ function getSdkVersion(idfPath) {
 
     let version = '';
 
+    // 1. git describe --tags (works for git clones)
     try {
         const gitDescribe = cp.execSync('git describe --tags --always', {
             cwd: idfPath,
@@ -185,18 +304,47 @@ function getSdkVersion(idfPath) {
             encoding: 'utf8',
             stdio: ['pipe', 'pipe', 'pipe']
         }).trim();
-        if (gitDescribe) version = gitDescribe;
+        if (gitDescribe && /^v?\d+/.test(gitDescribe)) version = gitDescribe;
     } catch {}
 
+    // 2. version.txt (written by ensureVersionTxt or manually)
     if (!version) {
         try {
             const versionFile = path.join(idfPath, 'version.txt');
             if (fs.existsSync(versionFile)) {
-                version = fs.readFileSync(versionFile, 'utf8').trim();
+                const txt = fs.readFileSync(versionFile, 'utf8').trim();
+                if (txt && /^v?\d+\.\d+/.test(txt)) version = txt;
             }
         } catch {}
     }
 
+    // 3. Extract from SDK folder name (e.g. ESP8266_RTOS_SDK-v3.4)
+    if (!version) {
+        const folderName = path.basename(idfPath);
+        const folderMatch = folderName.match(/[-_](v?\d+\.\d+(?:\.\d+)?(?:-\w+)?)/i);
+        if (folderMatch) {
+            version = folderMatch[1].startsWith('v') ? folderMatch[1] : 'v' + folderMatch[1];
+        }
+    }
+
+    // 4. CMakeLists.txt IDF_VERSION_MAJOR/MINOR/PATCH
+    if (!version) {
+        try {
+            const cmakeFile = path.join(idfPath, 'CMakeLists.txt');
+            if (fs.existsSync(cmakeFile)) {
+                const cmake = fs.readFileSync(cmakeFile, 'utf8');
+                const major = cmake.match(/IDF_VERSION_MAJOR\s+(\d+)/);
+                const minor = cmake.match(/IDF_VERSION_MINOR\s+(\d+)/);
+                const patch = cmake.match(/IDF_VERSION_PATCH\s+(\d+)/);
+                if (major && minor) {
+                    version = `v${major[1]}.${minor[1]}`;
+                    if (patch) version += `.${patch[1]}`;
+                }
+            }
+        } catch {}
+    }
+
+    // 5. git branch name as last resort
     if (!version) {
         try {
             const gitBranch = cp.execSync('git rev-parse --abbrev-ref HEAD', {
@@ -205,7 +353,10 @@ function getSdkVersion(idfPath) {
                 encoding: 'utf8',
                 stdio: ['pipe', 'pipe', 'pipe']
             }).trim();
-            if (gitBranch) version = gitBranch;
+            if (gitBranch) {
+                const verMatch = gitBranch.match(/(v?\d+\.\d+(?:\.\d+)?)/);
+                if (verMatch) version = verMatch[1].startsWith('v') ? verMatch[1] : 'v' + verMatch[1];
+            }
         } catch {}
     }
 
@@ -235,7 +386,12 @@ function getUserShell() {
 function setBusy(name) {
     _globalBusy       = true;
     _globalBusyName   = name;
-    _lastCmdStartTime = Date.now();
+    // #FIX: Only update _lastCmdStartTime for build-related commands.
+    // For flash/monitor/OTA commands, the elapsed time is not meaningful
+    // as "build time" and would mislead users.
+    if (/build|reconfigure|clean/i.test(name)) {
+        _lastCmdStartTime = Date.now();
+    }
     vscode.commands.executeCommand('setContext', 'esp.busy', true);
     if (_statusBarBusy) {
         _statusBarBusy.text            = `$(sync~spin) ESP: ${name}`;
@@ -303,9 +459,33 @@ function getTerm(name) {
     if (IS_WIN && shellPath.toLowerCase().includes('powershell') && cfg('useExecutionPolicyBypass')) {
         options.shellArgs = ['-ExecutionPolicy', 'Bypass', '-NoLogo', '-NoProfile'];
     }
+    // #FIX: Always set a valid CWD for the terminal. Without this, VS Code
+    // defaults to the first workspace folder — if that folder was deleted or
+    // renamed, the terminal fails to launch with "Starting directory does not exist".
+    const cwd = _resolveTermCwd();
+    if (cwd) options.cwd = cwd;
     const t = vscode.window.createTerminal(options);
     terms[name] = t;
     return t;
+}
+
+// Resolve a guaranteed-valid CWD for terminal creation.
+// Priority: active project root → first existing workspace folder → home dir.
+function _resolveTermCwd() {
+    // 1. Active project root (already validated by getActiveRoot via fs.existsSync)
+    const activeRoot = getActiveRoot();
+    if (activeRoot) return vscode.Uri.file(activeRoot);
+
+    // 2. First workspace folder that still exists on disk
+    const folders = vscode.workspace.workspaceFolders;
+    if (folders) {
+        for (const f of folders) {
+            try { if (fs.existsSync(f.uri.fsPath)) return f.uri; } catch {}
+        }
+    }
+
+    // 3. Home directory — always valid, terminal will at least launch
+    return vscode.Uri.file(os.homedir());
 }
 
 function buildCmd(parts) {
@@ -318,6 +498,10 @@ function buildCmd(parts) {
 }
 
 // ─── Create version.txt if missing or content invalid ────────────────────────
+// The Python builder (idf.py) requires version.txt in the SDK root with the
+// SDK version string, e.g. "v3.4". If the file is missing or contains garbage,
+// we write "v3.4" as the default — this is the ESP8266 RTOS SDK version this
+// extension is built for.
 function ensureVersionTxt(idfPath) {
     if (!idfPath || !fs.existsSync(idfPath)) return;
     const versionFile = path.join(idfPath, 'version.txt');
@@ -326,33 +510,18 @@ function ensureVersionTxt(idfPath) {
     if (!fs.existsSync(versionFile)) {
         needsWrite = true;
     } else {
-        const head = fs.readFileSync(versionFile, 'utf8').slice(0, 16).trim();
-        needsWrite = !/^v\d+\.\d+/.test(head);
+        const content = fs.readFileSync(versionFile, 'utf8').trim();
+        needsWrite = !/^v\d+\.\d+/.test(content);
     }
 
     if (needsWrite) {
         try {
-            // Try to get version from git tag first
-            let version = 'unknown';
-            try {
-                const result = cp.execSync('git describe --tags --always', {
-                    cwd: idfPath, encoding: 'utf8', timeout: 5000
-                }).trim();
-                if (result) version = result;
-            } catch {}
-            if (version === 'unknown') {
-                // Fallback: try to read from git HEAD or kconfig
-                try {
-                    const headRef = path.join(idfPath, '.git', 'HEAD');
-                    if (fs.existsSync(headRef)) {
-                        const head = fs.readFileSync(headRef, 'utf8').trim();
-                        const match = head.match(/ref: refs\/(tags|heads)\/(.+)/);
-                        if (match) version = match[2];
-                    }
-                } catch {}
-            }
-            fs.writeFileSync(versionFile, version);
-            log(`[version.txt] Written '${version}' to: ${versionFile}`);
+            // #FIX(1.85.0): Use the real detected SDK version instead of a hardcoded
+            // "v3.4". Previously this overwrote version.txt with the wrong value for
+            // users on v3.3 or v3.4-rc1 on every activation.
+            const ver = getSdkVersion(idfPath) || 'v3.4';
+            fs.writeFileSync(versionFile, ver);
+            log(`[version.txt] Written '${ver}' to: ${versionFile}`);
         } catch (e) {
             log(`[version.txt] Failed to write: ${e.message}`);
         }
@@ -364,6 +533,20 @@ function buildIdfEnvPrefix(idfPath, pythonCmd) {
     const py = pythonCmd || (IS_WIN ? 'python' : 'python3');
     const idfToolsPy = path.join(idfPath, 'tools', 'idf_tools.py');
     if (IS_WIN) {
+        // #FIX(1.85.0): Branch on the configured shell. Previously this always
+        // emitted PowerShell syntax (`$env:IDF_PATH=...`), so users who configured
+        // cmd.exe as their shell got an unset IDF_PATH and a broken build.
+        if (getUserShell().toLowerCase().includes('cmd')) {
+            // cmd.exe: set IDF_PATH, then apply idf_tools.py key-value export via
+            // for /f. The outer double quotes inside in('...') are required by
+            // cmd.exe for /f when the command string itself contains quotes.
+            // PowerShell is recommended for SDK/Python paths containing spaces.
+            // #FIX(1.85.1): Removed stray double-quote after 2^>nul — the
+            // trailing '"' before the closing single-quote broke cmd.exe parsing,
+            // leaving the for /f in('...') clause with an unmatched quote and
+            // preventing idf_tools.py environment variables from being set.
+            return `set "IDF_PATH=${idfPath}" & for /f "tokens=1,* delims==" %i in ('"${py}" "${idfToolsPy}" export --format key-value 2^>nul') do @set "%i=%j"`;
+        }
         return [
             `$env:IDF_PATH=${q(idfPath)}`,
             `try { ${py} ${q(idfToolsPy)} export --format key-value 2>$null | Where-Object { $_ -match '^[A-Za-z_][A-Za-z0-9_]*=' } | ForEach-Object { $k,$v = $_ -split '=',2; if ($k -eq 'PATH') { $env:PATH = ($v -replace [regex]::Escape('%PATH%'), $env:PATH) } else { Set-Item "Env:$k" $v } } } catch {}`,
@@ -440,7 +623,12 @@ function watchBuildResult(markerFile, taskName, root) {
                 log(`${taskName} ✅ OK`);
                 if (_statusBarBuild) {
                     _statusBarBuild.text = '$(check) Build OK';
-                    setTimeout(() => { if (_statusBarBuild) _statusBarBuild.text = '$(tools) Build'; }, 4000);
+                    if (_buildStatusTimer) clearTimeout(_buildStatusTimer);
+                    _buildStatusTimer = setTimeout(() => {
+                        _buildStatusTimer = null;
+                        // #FIX(1.85.0): Guard against the item being disposed during deactivation.
+                        try { if (_statusBarBuild) _statusBarBuild.text = '$(tools) Build'; } catch {}
+                    }, 4000);
                 }
             } else {
                 vscode.window.showErrorMessage(
@@ -449,7 +637,12 @@ function watchBuildResult(markerFile, taskName, root) {
                 log(`${taskName} ❌ failed (exit ${_exitCode})`);
                 if (_statusBarBuild) {
                     _statusBarBuild.text = '$(error) Build Failed';
-                    setTimeout(() => { if (_statusBarBuild) _statusBarBuild.text = '$(tools) Build'; }, 4000);
+                    if (_buildStatusTimer) clearTimeout(_buildStatusTimer);
+                    _buildStatusTimer = setTimeout(() => {
+                        _buildStatusTimer = null;
+                        // #FIX(1.85.0): Guard against the item being disposed during deactivation.
+                        try { if (_statusBarBuild) _statusBarBuild.text = '$(tools) Build'; } catch {}
+                    }, 4000);
                 }
             }
         } catch (e) {
@@ -462,6 +655,16 @@ function watchBuildResult(markerFile, taskName, root) {
 
 function buildMarkerCmd(markerFile) {
     if (IS_WIN) {
+        // #FIX(1.85.0): Branch on the configured shell. Previously this always
+        // emitted PowerShell syntax (`; if ($LASTEXITCODE ...)`), which cmd.exe
+        // cannot parse — so the marker file was never written and watchCommandDone
+        // timed out after 30 minutes for cmd.exe users.
+        if (getUserShell().toLowerCase().includes('cmd')) {
+            // cmd.exe: `call echo %^errorlevel%` forces re-evaluation of
+            // %errorlevel% AFTER the preceding command runs (the ^ escapes the
+            // first parse pass; `call` triggers the second, post-command pass).
+            return ` & call echo %^errorlevel% >${q(markerFile)}`;
+        }
         return `; if ($LASTEXITCODE -eq 0) { '0' | Out-File -NoNewline -Encoding ASCII ${q(markerFile)} } else { [string]$LASTEXITCODE | Out-File -NoNewline -Encoding ASCII ${q(markerFile)} }`;
     } else {
         // #35: Capture real exit code via $? after ';', so it always runs.
@@ -560,6 +763,12 @@ function buildEnvSetCmd(envObj) {
     const entries = Object.entries(envObj);
     if (!entries.length) return '';
     if (IS_WIN) {
+        // #FIX(1.85.1): Branch on configured shell — same class of bug as
+        // buildIdfEnvPrefix/pipInstallReqsParts. `$env:KEY=value` is PowerShell
+        // syntax; cmd.exe needs `set "KEY=value"`.
+        if (getUserShell().toLowerCase().includes('cmd')) {
+            return entries.map(([k, v]) => `set "${k}=${String(v).replace(/"/g, '""')}"`).join(' && ') + ' && ';
+        }
         // Trailing '; ' separates env commands from the next command
         return entries.map(([k, v]) => `$env:${k}=${q(String(v))}`).join('; ') + '; ';
     } else {
@@ -573,7 +782,7 @@ module.exports = {
     vscode, path, fs, os, cp,
 
     // Constants
-    IS_WIN, IS_MAC, IS_LINUX, PYTHON_CACHE_TTL, FLASH_SIZE_MAP,
+    IS_WIN, IS_MAC, IS_LINUX, PYTHON_CACHE_TTL, FLASH_SIZE_MAP, PORT_NAME_REGEX, MONITOR_TERM_NAMES,
 
     // State getters
     getTerms, getActiveRoot, getGlobalCtx, getOutputChannel, getPortCache,
@@ -593,6 +802,10 @@ module.exports = {
     // Internal helpers
     _setStatusBarItems,
     setOnBusyChange: (fn) => { _onBusyChange = fn; },
+    // #FIX(1.85.0): Clear module-level timers so they cannot fire on a deactivated extension.
+    disposeTimers: () => {
+        if (_buildStatusTimer) { clearTimeout(_buildStatusTimer); _buildStatusTimer = null; }
+    },
 
     // Utility functions
     q, log, cfg, setCfg, expandHome, getValidIdfPath, getSdkVersion,

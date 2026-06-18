@@ -669,11 +669,24 @@
 
 </div>
 
+<!-- Error catcher: runs before main script to catch SyntaxErrors -->
+<script>
+  window.addEventListener('error', function(ev) {
+    var el = document.querySelector('.content') || document.body;
+    if (el) {
+      el.innerHTML = '<div style="padding:20px;color:#f44747;background:rgba(244,71,71,0.05);border:1px solid rgba(244,71,71,0.3);border-radius:6px;margin:8px">' +
+        '<h3 style="margin:0 0 8px">Settings Editor Error</h3>' +
+        '<p style="margin:0;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap">' + (ev.message || 'Unknown error') + '</p>' +
+        '<p style="margin:8px 0 0;color:rgba(255,255,255,0.5);font-size:11px">Try closing and reopening the settings editor.</p></div>';
+    }
+  });
+</script>
 <script>
 // ── Globals ───────────────────────────────────────────────────
 const vscode = acquireVsCodeApi();
-let settings = {{INITIAL_SETTINGS}};
-let currentTab = '{{INITIAL_MODE}}';
+let _rawSettings = {{INITIAL_SETTINGS}};
+let settings = (_rawSettings && typeof _rawSettings === 'object') ? _rawSettings : {};
+let currentTab = {{INITIAL_MODE_JSON}} || 'build';
 
 // ── Tab Switching ─────────────────────────────────────────────
 function switchTab(tab) {
@@ -728,6 +741,7 @@ function toggleAnalysis(value) {
 
 // ── Apply Settings to UI ──────────────────────────────────────
 function applySettingsToUI(s) {
+  if (!s || typeof s !== 'object') return;
   settings = s;
 
   // All radio keys for per-command settings
@@ -786,10 +800,15 @@ function saveSettings() {
     }
   });
 
+  // Button will be re-enabled by host response (saveSettingsResult message)
+
+  // Safety timeout in case host never responds
   setTimeout(() => {
-    btn.disabled = false;
-    btn.textContent = '✔ Save Settings';
-  }, 1000);
+    if (btn.disabled) {
+      btn.disabled = false;
+      btn.textContent = '✔ Save Settings';
+    }
+  }, 5000);
 }
 
 // ── Show Status ───────────────────────────────────────────────
@@ -815,6 +834,19 @@ window.addEventListener('message', event => {
   if (msg.command === 'settingsUpdate') {
     applySettingsToUI(msg.data);
   }
+
+  if (msg.command === 'saveSettingsResult') {
+    const btn = document.getElementById('saveBtn');
+    if (btn) {
+      btn.disabled = false;
+      if (msg.error) {
+        btn.textContent = '❌ Save Failed';
+        setTimeout(() => { btn.textContent = '✔ Save Settings'; }, 3000);
+      } else {
+        btn.textContent = '✔ Save Settings';
+      }
+    }
+  }
 });
 
 // ── Initialize ────────────────────────────────────────────────
@@ -827,7 +859,20 @@ function init() {
   switchTab(initialTab);
 }
 
-init();
+try {
+  init();
+} catch (e) {
+  console.error('[SettingsEditor] Init error:', e);
+  var _errEl = document.querySelector('.content') || document.body;
+  if (_errEl) {
+    _errEl.innerHTML = 
+      '<div style="padding:20px;color:#f44747;background:rgba(244,71,71,0.05);border:1px solid rgba(244,71,71,0.3);border-radius:6px">' +
+      '<h3>Settings Editor Initialization Failed</h3>' +
+      '<p style="font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap">' + 
+      (e.message || String(e)) + '</p>' +
+      '<p style="color:rgba(255,255,255,0.5);font-size:11px;margin-top:8px">Try closing and reopening the settings editor.</p></div>';
+  }
+}
 </script>
 </body>
 </html>

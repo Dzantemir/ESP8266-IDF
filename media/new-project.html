@@ -659,10 +659,23 @@
   </div>
 </div>
 
+<!-- Error catcher: runs before main script to catch SyntaxErrors -->
+<script>
+  window.addEventListener('error', function(ev) {
+    var el = document.querySelector('.content') || document.body;
+    if (el) {
+      el.innerHTML = '<div style="padding:20px;color:#f44747;background:rgba(244,71,71,0.05);border:1px solid rgba(244,71,71,0.3);border-radius:6px;margin:8px">' +
+        '<h3 style="margin:0 0 8px">New Project Error</h3>' +
+        '<p style="margin:0;font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap">' + (ev.message || 'Unknown error') + '</p>' +
+        '<p style="margin:8px 0 0;color:rgba(255,255,255,0.5);font-size:11px">Try closing and reopening the dialog.</p></div>';
+    }
+  });
+</script>
+
 <script>
 // ── Globals ───────────────────────────────────────────────────
 const vscode = acquireVsCodeApi();
-const AVAILABLE_COMPONENTS = {{AVAILABLE_COMPONENTS}};
+const AVAILABLE_COMPONENTS = {{AVAILABLE_COMPONENTS_JSON}} || [];
 
 let formData = {
   parentDir: '',
@@ -890,9 +903,9 @@ function renderCompPickerList(components, selectedSet) {
   ).join('');
 
   list.querySelectorAll('.comp-picker-item').forEach(item => {
-    item.addEventListener('click', () => {
+    item.addEventListener('click', (e) => {
       const cb = item.querySelector('input');
-      cb.checked = !cb.checked;
+      if (e.target !== cb) cb.checked = !cb.checked;
       item.classList.toggle('selected', cb.checked);
     });
   });
@@ -999,7 +1012,7 @@ window.addEventListener('message', event => {
 
   if (msg.command === 'setPickedComponents') {
     const components = msg.components || [];
-    const field = msg.type === 'exclude' ? 'excludeComponents' : 'excludeComponents'; // only 'exclude' type is used in New Project
+    const field = 'excludeComponents'; // only 'exclude' type is used in New Project
     formData[field] = components;
     renderTags(field);
     updatePreview();
@@ -1014,7 +1027,20 @@ function init() {
   updateCreateButton();
 }
 
-init();
+try {
+  init();
+} catch (e) {
+  console.error('[NewProject] Init error:', e);
+  var _errEl = document.querySelector('.content') || document.body;
+  if (_errEl) {
+    _errEl.innerHTML = 
+      '<div style="padding:20px;color:#f44747;background:rgba(244,71,71,0.05);border:1px solid rgba(244,71,71,0.3);border-radius:6px">' +
+      '<h3>New Project Initialization Failed</h3>' +
+      '<p style="font-family:Consolas,monospace;font-size:12px;white-space:pre-wrap">' + 
+      (e.message || String(e)) + '</p>' +
+      '<p style="color:rgba(255,255,255,0.5);font-size:11px;margin-top:8px">Try closing and reopening the dialog.</p></div>';
+  }
+}
 </script>
 </body>
 </html>

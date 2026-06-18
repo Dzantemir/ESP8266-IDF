@@ -22,7 +22,13 @@ function scanComponents(dir) {
                 const cmake = path.join(sub, 'CMakeLists.txt');
                 if (!fs.existsSync(cmake)) return false;
                 const content = fs.readFileSync(cmake, 'utf8');
-                return /idf_component_register|register_component|set\s*\(\s*srcs/i.test(content);
+                // #FIX: Strip comment lines before testing — a commented-out
+                // idf_component_register() or register_component() inside a
+                // # comment should not cause the component to be detected.
+                const strippedContent = content.split('\n')
+                    .map(line => line.replace(/#.*$/, ''))
+                    .join('\n');
+                return /idf_component_register|register_component|set\s*\(\s*srcs/i.test(strippedContent);
             })
             .sort();
     } catch { return []; }
@@ -142,20 +148,55 @@ function readExcludedComponents(rootDir) {
     const cmakePath = path.join(rootDir, 'CMakeLists.txt');
     if (!fs.existsSync(cmakePath)) return [];
     const cmake = fs.readFileSync(cmakePath, 'utf8');
-    const lines = cmake.split('\n');
+    return readExcludedComponentsFromText(cmake);
+}
+
+/**
+ * Parse EXCLUDE_COMPONENTS from raw CMakeLists text.
+ * Shared implementation used by both components.js and cmakeEditor.js.
+ */
+function readExcludedComponentsFromText(cmakeText) {
+    if (!cmakeText) return [];
+    // #FIX(1.85.0): Strip per-line `#` comments BEFORE joining the multi-line
+    // set(...) value, so a `#`-comment on an early line doesn't swallow
+    // subsequent multi-line values. E.g. `set(EXCLUDE_COMPONENTS foo # c\n bar)`
+    // previously joined to "foo # c bar)" and the post-join `#` strip dropped
+    // "bar" entirely. The stripComment helper preserves quoted `#` characters.
+    const stripComment = (line) => {
+        let inQuote = false;
+        let result = '';
+        for (let ci = 0; ci < line.length; ci++) {
+            const ch = line[ci];
+            if (ch === '"' && (ci === 0 || line[ci - 1] !== '\\')) {
+                inQuote = !inQuote;
+                result += ch;
+            } else if (ch === '#' && !inQuote) {
+                break;
+            } else {
+                result += ch;
+            }
+        }
+        return result;
+    };
+    // #FIX(1.85.0): Use \b (word boundary) instead of \s after EXCLUDE_COMPONENTS
+    // so a multi-line `set(EXCLUDE_COMPONENTS\n  foo\n  bar)` (newline right
+    // after the name) is detected. The previous \s required a whitespace char
+    // immediately after the name and failed at end-of-line, silently dropping
+    // the user's exclusions.
+    const lines = cmakeText.split('\n').map(stripComment);
     let setStartLine = -1;
     let parenDepth = 0;
     let valueStr = '';
     for (let i = 0; i < lines.length; i++) {
         const stripped = lines[i].trim();
         if (setStartLine === -1) {
-            if (/^set\s*\(\s*EXCLUDE_COMPONENTS\s/i.test(stripped)) {
+            if (/^set\s*\(\s*EXCLUDE_COMPONENTS\b/i.test(stripped)) {
                 setStartLine = i;
                 for (const ch of stripped) {
                     if (ch === '(') parenDepth++;
                     if (ch === ')') parenDepth--;
                 }
-                const valMatch = stripped.match(/^set\s*\(\s*EXCLUDE_COMPONENTS\s+([\s\S]*)/i);
+                const valMatch = stripped.match(/^set\s*\(\s*EXCLUDE_COMPONENTS\b([\s\S]*)/i);
                 if (valMatch) valueStr = valMatch[1];
                 if (parenDepth <= 0) break;
             }
@@ -171,22 +212,10 @@ function readExcludedComponents(rootDir) {
     if (setStartLine === -1) return [];
     const fullMatch = valueStr.match(/^([\s\S]*?)\)/);
     if (!fullMatch) return [];
-    const valuePart = fullMatch[1].split('\n').map(line => {
-        let inQuote = false;
-        let result = '';
-        for (let ci = 0; ci < line.length; ci++) {
-            const ch = line[ci];
-            if (ch === '"' && (ci === 0 || line[ci - 1] !== '\\')) {
-                inQuote = !inQuote;
-                result += ch;
-            } else if (ch === '#' && !inQuote) {
-                break;
-            } else {
-                result += ch;
-            }
-        }
-        return result;
-    }).join(' ');
+    // #FIX(1.85.0): Comments were already stripped per-line above, so the
+    // valuePart is just fullMatch[1] (already space-joined) — no further
+    // per-line comment stripping needed.
+    const valuePart = fullMatch[1];
     return valuePart.trim().split(/\s+/).map(c => c.replace(/^"|"$/g, '')).filter(Boolean);
 }
 
@@ -212,7 +241,10 @@ function writeExcludedComponents(rootDir, excludedList) {
             continue;
         }
         const stripped = line.trim();
-        if (/^set\s*\(\s*EXCLUDE_COMPONENTS\s/i.test(stripped)) {
+        // #FIX(1.85.0): Use \b instead of \s after EXCLUDE_COMPONENTS so a
+        // multi-line `set(EXCLUDE_COMPONENTS\n  ...)` (newline right after the
+        // name) is also matched and removed here, matching readExcludedComponentsFromText.
+        if (/^set\s*\(\s*EXCLUDE_COMPONENTS\b/i.test(stripped)) {
             parenDepth = 0;
             for (const ch of stripped) {
                 if (ch === '(') parenDepth++;
@@ -232,10 +264,23 @@ function writeExcludedComponents(rootDir, excludedList) {
         const compsStr = excludedList.join(' ');
         const excludeLine = `set(EXCLUDE_COMPONENTS ${compsStr})\n`;
         const includeMatch = cmake.match(/(include\s*\(\s*\$ENV\{IDF_PATH\}[^)]*project\.cmake\s*\)\s*\n?)/i);
+        let inserted = false;
         if (includeMatch) {
             cmake = cmake.replace(includeMatch[0], `${includeMatch[0]}${excludeLine}`);
+            inserted = true;
         } else {
-            cmake = cmake.replace(/(project\s*\()/i, `${excludeLine}$1`);
+            const projectMatch = cmake.match(/(project\s*\()/i);
+            if (projectMatch) {
+                cmake = cmake.replace(projectMatch[0], `${excludeLine}${projectMatch[0]}`);
+                inserted = true;
+            }
+        }
+        // #FIX(1.85.0): If CMakeLists.txt has neither the IDF project.cmake
+        // include nor a project() call, append the set(EXCLUDE_COMPONENTS ...)
+        // at EOF. Without this, the old set(...) was already removed above and
+        // the user's exclusion list would be silently lost.
+        if (!inserted) {
+            cmake = cmake.replace(/\s*$/, '') + '\n' + excludeLine;
         }
     }
 
@@ -249,6 +294,13 @@ async function cmdDeleteComponent(item) {
 
     const compName = item?._compName || item?.label;
     if (!compName) { vscode.window.showErrorMessage('ESP: Cannot determine component name.'); return; }
+    // #FIX(1.85.0): Validate compName with the same ^[a-zA-Z0-9_]+$ regex as
+    // cmdAddComponent to reject malformed/attacker-controlled tree-item labels
+    // (which feed directly into filesystem paths).
+    if (!compName.match(/^[a-zA-Z0-9_]+$/)) {
+        vscode.window.showErrorMessage('ESP: Invalid component name.');
+        return;
+    }
 
     const compDir = path.join(root, 'components', compName);
     if (!fs.existsSync(compDir)) {
@@ -476,8 +528,16 @@ function _getAddComponentHtml(availableComponents, projectRoot) {
     }
 
     // Replace placeholders
-    html = html.replace(/\{\{AVAILABLE_COMPONENTS\}\}/g, JSON.stringify(availableComponents));
-    html = html.replace(/\{\{PROJECT_ROOT\}\}/g, projectRoot.replace(/\\/g, '\\\\'));
+    // #FIX(1.85.0): Escape `</` in the non-_JSON placeholder replacements too
+    // (the _JSON variants already do), to prevent XSS if a component folder
+    // name contains `</script>`. Use a function replacement `() => ...` so
+    // `$&`/`$'`/`` $` `` in the data are not interpreted by String.replace.
+    const _escJson = (v) => JSON.stringify(v).replace(/<\//g, '<\\/');
+    html = html.replace(/\{\{AVAILABLE_COMPONENTS\}\}/g, () => _escJson(availableComponents));
+    html = html.replace(/\{\{PROJECT_ROOT\}\}/g, () => _escJson(projectRoot));
+    // JSON-safe templates (new — for _JSON suffixed placeholders in HTML):
+    html = html.replace(/\{\{AVAILABLE_COMPONENTS_JSON\}\}/g, JSON.stringify(availableComponents).replace(/<\//g, '<\\/'));
+    html = html.replace(/\{\{PROJECT_ROOT_JSON\}\}/g, JSON.stringify(projectRoot).replace(/<\//g, '<\\/'));
 
     return html;
 }
@@ -499,6 +559,13 @@ function cmdEditComponent(item) {
 
     const compName = item?._compName || item?.label;
     if (!compName) { vscode.window.showErrorMessage('ESP: Cannot determine component name.'); return; }
+    // #FIX(1.85.0): Validate compName with the same ^[a-zA-Z0-9_]+$ regex as
+    // cmdAddComponent to reject malformed/attacker-controlled tree-item labels
+    // (which feed directly into filesystem paths).
+    if (!compName.match(/^[a-zA-Z0-9_]+$/)) {
+        vscode.window.showErrorMessage('ESP: Invalid component name.');
+        return;
+    }
 
     const compDir = path.join(root, 'components', compName);
     if (!fs.existsSync(compDir)) {
@@ -604,7 +671,11 @@ function cmdEditComponent(item) {
 
         if (msg.command === 'saveComponent') {
             try {
-                const { compName, originalName, srcs, headersChoice, requires, compDir: savedCompDir } = msg.data;
+                // #FIX(1.85.0): Do NOT pull `compDir` from msg.data — the
+                // webview-supplied value is untrusted and could enable path
+                // traversal. The component directory is always re-derived
+                // server-side from root + originalName below.
+                const { compName, originalName, srcs, headersChoice, requires } = msg.data;
 
                 // Final validation
                 const root = getActiveRoot();
@@ -633,7 +704,10 @@ function cmdEditComponent(item) {
                 const reqLine  = requires.length ? `\n                       REQUIRES ${requires.join(' ')}` : '';
                 const cmakeContent = `idf_component_register(SRCS ${srcsLine}${incLine}${reqLine}\n)\n`;
 
-                let finalCompDir = savedCompDir || path.join(root, 'components', originalName);
+                // #FIX(1.85.0): Always derive the component directory from the
+                // project root and the original component name — never from the
+                // webview-supplied msg.data.compDir (path-traversal hardening).
+                let finalCompDir = path.join(root, 'components', originalName);
                 let finalCmakePath = path.join(finalCompDir, 'CMakeLists.txt');
 
                 // Handle rename
@@ -728,9 +802,21 @@ function _getEditComponentHtml(availableComponents, projectRoot, initialData) {
     }
 
     // Replace placeholders
-    html = html.replace(/\{\{AVAILABLE_COMPONENTS\}\}/g, JSON.stringify(availableComponents));
-    html = html.replace(/\{\{PROJECT_ROOT\}\}/g, projectRoot.replace(/\\/g, '\\\\'));
-    html = html.replace(/\{\{INITIAL_DATA\}\}/g, JSON.stringify(initialData));
+    // #FIX(1.85.0): Escape `</` in the non-_JSON placeholder replacements too
+    // (the _JSON variants already do), to prevent XSS if a component folder
+    // name contains `</script>`. Use a function replacement `() => ...` so
+    // `$&`/`$'`/`` $` `` in the data are not interpreted by String.replace.
+    const _escJson = (v) => JSON.stringify(v).replace(/<\//g, '<\\/');
+    html = html.replace(/\{\{AVAILABLE_COMPONENTS\}\}/g, () => _escJson(availableComponents));
+    html = html.replace(/\{\{PROJECT_ROOT\}\}/g, () => _escJson(projectRoot));
+    // #FIX(1.85.1): Use _escJson + function replacement — same protection as
+    // AVAILABLE_COMPONENTS/PROJECT_ROOT above. User-controlled data (component
+    // names, source paths) in initialData could contain `</script>` (XSS) or
+    // `$&`/`$'` (String.replace corruption).
+    html = html.replace(/\{\{INITIAL_DATA\}\}/g, () => _escJson(initialData));
+    // JSON-safe templates (new — for _JSON suffixed placeholders in HTML):
+    html = html.replace(/\{\{AVAILABLE_COMPONENTS_JSON\}\}/g, JSON.stringify(availableComponents).replace(/<\//g, '<\\/'));
+    html = html.replace(/\{\{PROJECT_ROOT_JSON\}\}/g, JSON.stringify(projectRoot).replace(/<\//g, '<\\/'));
 
     return html;
 }
@@ -754,7 +840,7 @@ function closeEditComponentPanel() {
 
 module.exports = {
     scanComponents, pickComponents, pickExcludedComponents,
-    readExcludedComponents, writeExcludedComponents,
+    readExcludedComponents, readExcludedComponentsFromText, writeExcludedComponents,
     cmdDeleteComponent, cmdAddComponent, cmdEditComponent,
     closeAddComponentPanel, closeEditComponentPanel,
 };

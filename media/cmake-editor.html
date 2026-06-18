@@ -681,11 +681,11 @@
   <div class="header-left">
     <h2>
       <span>ESP CMake Editor</span>
-      <span id="componentLabel">— {{COMPONENT_NAME}}/CMakeLists.txt</span>
+      <span id="componentLabel"></span>
       <span class="cmake-format-badge modern" id="formatBadge">Modern</span>
       <span class="dirty-dot" id="dirtyDot" title="Unsaved changes"></span>
     </h2>
-    <p class="subtitle" id="cmakePathLabel">{{CMAKE_PATH}}</p>
+    <p class="subtitle" id="cmakePathLabel"></p>
   </div>
   <div style="display:flex;align-items:center;gap:10px">
     <span class="format-toggle" id="formatToggle" style="display:none">
@@ -743,11 +743,12 @@
 // ── Globals ───────────────────────────────────────────────────
 const vscode = acquireVsCodeApi();
 const IS_ROOT = {{IS_ROOT}};
-const COMPONENT_NAME = "{{COMPONENT_NAME}}";
-const PROJECT_ROOT = "{{PROJECT_ROOT}}";
-const COMPONENT_DIR = "{{COMPONENT_DIR}}";
-const AVAILABLE_COMPONENTS = {{AVAILABLE_COMPONENTS}};
-let cmakeFormat = {{CMAKE_FORMAT}};
+const COMPONENT_NAME = {{COMPONENT_NAME_JSON}};
+const PROJECT_ROOT = {{PROJECT_ROOT_JSON}};
+const COMPONENT_DIR = {{COMPONENT_DIR_JSON}};
+const CMAKE_PATH = {{CMAKE_PATH_JSON}} || '';
+const AVAILABLE_COMPONENTS = {{AVAILABLE_COMPONENTS_JSON}} || [];
+let cmakeFormat = {{CMAKE_FORMAT_JSON}} || "modern";
 
 let formData;
 let isDirty = false;
@@ -781,8 +782,12 @@ function init() {
   }
   formData.cmakeFormat = cmakeFormat;
   if (IS_ROOT) {
-    document.getElementById('componentLabel').textContent = '— Root CMakeLists.txt';
+    document.getElementById('componentLabel').textContent = '\u2014 Root CMakeLists.txt';
+  } else {
+    document.getElementById('componentLabel').textContent = '\u2014 ' + COMPONENT_NAME + '/CMakeLists.txt';
   }
+  const cmakePathLabel = document.getElementById('cmakePathLabel');
+  if (cmakePathLabel) cmakePathLabel.textContent = CMAKE_PATH;
   // Show format toggle for non-root editors
   if (!IS_ROOT) {
     const formatToggle = document.getElementById('formatToggle');
@@ -982,7 +987,8 @@ function renderRootForm() {
     `)}
 
     ${section('preview', '&#x1F4C4;', 'CMake Preview', `
-      <div class="cmake-preview" id="cmakePreview"></div>
+      <!-- #FIX(1.85.0): id renamed from cmakePreview to cmakePreviewRoot to avoid duplicate id collision with renderComponentForm() -->
+      <div class="cmake-preview" id="cmakePreviewRoot"></div>
     `)}
   `;
 }
@@ -1116,7 +1122,8 @@ function renderComponentForm() {
     `)}
 
     ${section('preview', '&#x1F4C4;', 'CMake Preview', `
-      <div class="cmake-preview" id="cmakePreview"></div>
+      <!-- #FIX(1.85.0): id renamed from cmakePreview to cmakePreviewComp to avoid duplicate id collision with renderRootForm() -->
+      <div class="cmake-preview" id="cmakePreviewComp"></div>
     `)}
   `;
 }
@@ -1352,8 +1359,8 @@ function highlightCmake(code) {
     // Highlight keywords
     let highlighted = esc(line)
       .replace(/\b(if|else|elseif|endif|set|unset|message|include|option)\b/g, '<span class="kw">$1</span>')
+      .replace(/(CONFIG_\w+)(?![^<]*<\/span>)/g, '<span class="var">$1</span>')
       .replace(/\$\{([^}]+)\}/g, '<span class="var">${$1}</span>')
-      .replace(/(CONFIG_\w+)/g, '<span class="var">$1</span>')
       .replace(/(#.*$)/, '<span class="cmt">$1</span>');
     return highlighted;
   }).join('\n');
@@ -1455,9 +1462,9 @@ function renderCompPickerList(components, selectedSet) {
   ).join('');
 
   list.querySelectorAll('.comp-picker-item').forEach(item => {
-    item.addEventListener('click', () => {
+    item.addEventListener('click', (e) => {
       const cb = item.querySelector('input');
-      cb.checked = !cb.checked;
+      if (e.target !== cb) cb.checked = !cb.checked;
       item.classList.toggle('selected', cb.checked);
     });
   });
@@ -1492,11 +1499,8 @@ function confirmCompPicker() {
     : compPickerTarget === 'components' ? 'components'
     : 'excludeComponents';
 
-  selected.forEach(c => {
-    if (!formData[field].includes(c)) {
-      formData[field].push(c);
-    }
-  });
+  // Replace with selected (not just append) — removes unchecked too
+  formData[field] = selected;
 
   setDirty();
   renderTags(field);
@@ -1516,7 +1520,11 @@ function requestScan() {
 
 // ── CMake Preview ─────────────────────────────────────────────
 function updatePreview() {
-  const preview = document.getElementById('cmakePreview');
+  // #FIX(1.85.0): pick the correct preview element id based on which form
+  // is currently rendered (root vs component). Both ids used to be
+  // duplicated as 'cmakePreview', which is brittle even though only one
+  // form is rendered at a time.
+  const preview = document.getElementById(IS_ROOT ? 'cmakePreviewRoot' : 'cmakePreviewComp');
   if (!preview) return;
 
   if (IS_ROOT) {
@@ -1753,7 +1761,8 @@ function generateLegacyPreviewHtml() {
 function refreshFromDisk() {
   if (isBusy) return;
   if (isDirty) {
-    if (!confirm('Discard unsaved changes and reload from disk?')) return;
+    vscode.postMessage({ command: 'confirmRefresh' });
+    return;
   }
   vscode.postMessage({ command: 'refresh' });
 }
@@ -1839,12 +1848,30 @@ function updateFormatBadge() {
 window.addEventListener('message', event => {
   const msg = event.data;
 
+  if (msg.command === 'requestSave') {
+    // #FIX(1.85.0): Host (saveAllDirtyCmakePanels) requests an auto-save
+    // before build/flash so unsaved CMakeLists.txt edits are flushed to
+    // disk. The existing save() function posts the form data back to the
+    // host as a 'save' message, which the auto-save Promise resolves on.
+    // Without this handler the auto-save always timed out and edits were
+    // silently lost.
+    save();
+  }
+
+  if (msg.command === 'confirmRefreshResult') {
+    if (msg.confirmed) {
+      vscode.postMessage({ command: 'refresh' });
+    }
+  }
+
   if (msg.command === 'setPickedFiles') {
     const files = msg.files || [];
     const target = msg.target;
     if (target === 'sdkconfig') {
       // Single value — set directly instead of adding to list
-      formData.sdkconfig = files[0] || '';
+      // Don't overwrite on cancel
+      if (msg.cancelled || !files.length) return;
+      formData.sdkconfig = files[0];
       const input = document.getElementById('sdkconfig_input');
       if (input) input.value = formData.sdkconfig;
       setDirty();

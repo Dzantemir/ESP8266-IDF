@@ -7,7 +7,7 @@ const { vscode, path, fs,
         getGlobalBusyName,
         getPartitionPanel, setPartitionPanel,
         getPushSdkconfigUpdate, setPushSdkconfigUpdate,
-        getSdkconfigValue, getPartitionCsvFilename,
+        getSdkconfigValue, getPartitionCsvFilename, setSdkconfigCache,
         FLASH_SIZE_MAP,
 } = require('./helpers');
 
@@ -99,13 +99,20 @@ async function _copyBinToProject(srcPath, root) {
 
     // Check for name collision — ask user what to do
     if (fs.existsSync(destPath)) {
-        // Check if it's the same file (same size + same content hash would be ideal, but same size is a good quick check)
-        const srcSize = fs.statSync(srcPath).size;
-        const destSize = fs.statSync(destPath).size;
-        if (srcSize === destSize) {
-            // Could be the same file — ask user
+        // #FIX: Use SHA1 hash comparison instead of file size — two different files
+        // can have the same size, leading to false "same file" detection.
+        const crypto = require('crypto');
+        function _fileHash(filePath) {
+            try {
+                return crypto.createHash('sha1').update(fs.readFileSync(filePath)).digest('hex');
+            } catch { return null; }
+        }
+        const srcHash = _fileHash(srcPath);
+        const destHash = _fileHash(destPath);
+        if (srcHash && destHash && srcHash === destHash) {
+            // Same file (hash matches) — ask user
             const choice = await vscode.window.showWarningMessage(
-                `ESP: File "${baseName}" already exists in the project root. Overwrite it?`,
+                `ESP: File "${baseName}" already exists in the project root (identical content). Overwrite it?`,
                 'Overwrite', 'Keep existing', 'Cancel'
             );
             if (choice === 'Keep existing') {
@@ -178,7 +185,16 @@ function cmdPartitionEditor() {
         'espPartitionEditor',
         'ESP Partition Editor',
         vscode.ViewColumn.One,
-        { enableScripts: true, retainContextWhenHidden: true }
+        // #FIX(1.85.0): Restrict localResourceRoots to the extension's media
+        // directory (matches cmakeEditor/settingsEditor/newProjectEditor)
+        // instead of defaulting to the entire workspace folder.
+        {
+            enableScripts: true,
+            retainContextWhenHidden: true,
+            localResourceRoots: [
+                vscode.Uri.file(path.join(getGlobalCtx().extensionPath, 'media')),
+            ],
+        }
     );
 
     // Try to read CSV: first from project, then from SDK built-in
@@ -282,9 +298,12 @@ function cmdPartitionEditor() {
             } catch { }
         });
         if (_sizeUpdates.length > 0) {
-            setTimeout(() => {
-                panel.webview.postMessage({ command: 'applySizeUpdatesOnOpen', updates: _sizeUpdates });
+            const _sizeUpdateTimer = setTimeout(() => {
+                if (panel.visible) {
+                    panel.webview.postMessage({ command: 'applySizeUpdatesOnOpen', updates: _sizeUpdates });
+                }
             }, 300);
+            panel.onDidDispose(() => clearTimeout(_sizeUpdateTimer), null);
         }
     }
 
@@ -338,6 +357,9 @@ function cmdPartitionEditor() {
             content += `\nCONFIG_PARTITION_TABLE_CUSTOM_FILENAME="${saveFilename}"\n`;
         }
         fs.writeFileSync(sdkconfigPath, content, 'utf8');
+        // #FIX: Invalidate sdkconfig cache so subsequent getSdkconfigValue() calls
+        // return the updated values (e.g. CONFIG_PARTITION_TABLE_CUSTOM=y)
+        setSdkconfigCache(null);
         log(`[partition] switched sdkconfig to Custom mode, save file: ${saveFilename}`);
     }
 
@@ -565,8 +587,11 @@ function cmdPartitionEditor() {
 }
 
 function getPartitionEditorHtml(existingCsv, csvFilename, ptOffsetVal, flashSizeVal, restoredLinks = [], modeLabel, modeHint, isBuiltIn) {
-    const existingData       = JSON.stringify(parseCsvToPartitions(existingCsv));
-    const restoredLinksData  = JSON.stringify(restoredLinks || []);
+    // #FIX(1.85.1): Add </script-escape for user-controlled JSON data embedded
+    // into <script> blocks. Partition names and bin link paths are user-editable
+    // and could contain `</script>`, breaking the webview's script tag (XSS).
+    const existingData       = JSON.stringify(parseCsvToPartitions(existingCsv)).replace(/<\//g, '<\\/');
+    const restoredLinksData  = JSON.stringify(restoredLinks || []).replace(/<\//g, '<\\/');
     const safePtOffset  = String(ptOffsetVal  || '0x8000').replace(/[^0-9xa-fA-F]/g,'');
     const safeFlashSize = String(flashSizeVal || '1048576').replace(/[^0-9]/g,'');
     const safeFilename = (csvFilename || 'partitions.csv').replace(/[<>"'&]/g, '');
@@ -585,15 +610,26 @@ function getPartitionEditorHtml(existingCsv, csvFilename, ptOffsetVal, flashSize
     }
 
     // Replace placeholders with dynamic values
-    html = html.replace('{{SAFE_FILENAME}}', safeFilename);
-    html = html.replace('{{SAFE_PT_OFFSET}}', safePtOffset);
-    html = html.replace('{{SAFE_FLASH_SIZE}}', safeFlashSize);
-    html = html.replace('{{FLASH_SIZE_LABEL}}', flashSizeLabel);
-    html = html.replace('{{EXISTING_DATA}}', existingData);
-    html = html.replace('{{RESTORED_LINKS_DATA}}', restoredLinksData);
-    html = html.replace('{{MODE_LABEL}}', safeModeLabel);
-    html = html.replace('{{MODE_HINT}}', safeModeHint);
+    // #FIX(1.85.0): Use function replacements so user data containing $&, $`,
+    // $', or $1–$9 is NOT interpreted as a special replacement pattern by
+    // String.replace (which would corrupt the HTML/JS). Only literals that are
+    // known to be safe (e.g. '1'/'0') keep the plain string form.
+    html = html.replace('{{SAFE_FILENAME}}', () => safeFilename);
+    html = html.replace('{{SAFE_PT_OFFSET}}', () => safePtOffset);
+    html = html.replace('{{SAFE_FLASH_SIZE}}', () => safeFlashSize);
+    html = html.replace('{{FLASH_SIZE_LABEL}}', () => flashSizeLabel);
+    html = html.replace('{{EXISTING_DATA}}', () => existingData);
+    html = html.replace('{{RESTORED_LINKS_DATA}}', () => restoredLinksData);
+    html = html.replace('{{MODE_LABEL}}', () => safeModeLabel);
+    html = html.replace('{{MODE_HINT}}', () => safeModeHint);
     html = html.replace('{{IS_BUILTIN}}', isBuiltIn ? '1' : '0');
+
+    // JSON-safe templates (new — for _JSON suffixed placeholders in HTML):
+    html = html.replace('{{IS_BUILTIN_JSON}}', JSON.stringify(isBuiltIn ? '1' : '0'));
+    html = html.replace('{{MODE_LABEL_JSON}}', () => JSON.stringify(safeModeLabel));
+    html = html.replace('{{MODE_HINT_JSON}}', () => JSON.stringify(safeModeHint));
+    html = html.replace('{{SAFE_FLASH_SIZE_JSON}}', () => JSON.stringify(safeFlashSize));
+    html = html.replace('{{SAFE_FILENAME_JSON}}', () => JSON.stringify(safeFilename));
 
     return html;
 }

@@ -7,20 +7,8 @@ const { vscode, path, fs,
 
 let _settingsPanel = null;
 
-function cmdSettingsEditor(mode = 'build') {
-    if (checkBusy()) return;
-    const root = getActiveRoot();
-    if (!root) { warnNoProject(); return; }
-
-    if (_settingsPanel) {
-        _settingsPanel.reveal(vscode.ViewColumn.One);
-        // Send mode switch message
-        _settingsPanel.webview.postMessage({ command: 'switchMode', mode });
-        return;
-    }
-
-    // Gather current settings
-    const currentSettings = {
+function _getDefaultSettings() {
+    return {
         preBuildAction:    cfg('preBuildAction')    || 'none',
         postBuildAction:   cfg('postBuildAction')   || 'none',
         postBuildAnalysis: cfg('postBuildAnalysis') || [],
@@ -37,6 +25,22 @@ function cmdSettingsEditor(mode = 'build') {
         postFlashPartitionAction:   cfg('postFlashPartitionAction')   || 'none',
         postFlashFsAction: cfg('postFlashFsAction') || 'none',
     };
+}
+
+function cmdSettingsEditor(mode = 'build') {
+    if (checkBusy()) return;
+    const root = getActiveRoot();
+    if (!root) { warnNoProject(); return; }
+
+    if (_settingsPanel) {
+        _settingsPanel.reveal(vscode.ViewColumn.One);
+        // Send mode switch message
+        _settingsPanel.webview.postMessage({ command: 'switchMode', mode });
+        return;
+    }
+
+    // Gather current settings
+    const currentSettings = _getDefaultSettings();
 
     const panel = vscode.window.createWebviewPanel(
         'espSettingsEditor',
@@ -79,37 +83,21 @@ function cmdSettingsEditor(mode = 'build') {
                 if (s.postFlashFsAction !== undefined) await setCfg('postFlashFsAction', s.postFlashFsAction);
 
                 vscode.window.showInformationMessage('✅ ESP settings saved.');
+                panel.webview.postMessage({ command: 'saveSettingsResult', error: false });
                 if (getProvider()) getProvider().refresh();
                 const { refreshStatusBar } = require('./statusBar');
                 refreshStatusBar();
             } catch (e) {
                 vscode.window.showErrorMessage(`ESP: Failed to save settings: ${e.message}`);
+                panel.webview.postMessage({ command: 'saveSettingsResult', error: true });
             }
             return;
         }
 
-        if (msg.command === 'refreshSettings') {
-            // Re-read current settings and send back
-            const freshSettings = {
-                preBuildAction:    cfg('preBuildAction')    || 'none',
-                postBuildAction:   cfg('postBuildAction')   || 'none',
-                postBuildAnalysis: cfg('postBuildAnalysis') || [],
-                preBuildAppAction:    cfg('preBuildAppAction')    || 'none',
-                postBuildAppAction:   cfg('postBuildAppAction')   || 'none',
-                preBuildBootloaderAction:    cfg('preBuildBootloaderAction')    || 'none',
-                postBuildBootloaderAction:   cfg('postBuildBootloaderAction')   || 'none',
-                preBuildPartitionAction:    cfg('preBuildPartitionAction')    || 'none',
-                postBuildPartitionAction:   cfg('postBuildPartitionAction')   || 'none',
-                preFlashAction:    cfg('preFlashAction')    || 'none',
-                postFlashAction:   cfg('postFlashAction')   || 'none',
-                postFlashAppAction:   cfg('postFlashAppAction')   || 'none',
-                postFlashBootloaderAction:   cfg('postFlashBootloaderAction')   || 'none',
-                postFlashPartitionAction:   cfg('postFlashPartitionAction')   || 'none',
-                postFlashFsAction: cfg('postFlashFsAction') || 'none',
-            };
-            panel.webview.postMessage({ command: 'settingsUpdate', data: freshSettings });
-            return;
-        }
+        // #FIX(1.85.0): removed dead refreshSettings handler — the HTML
+        // (settings-editor.html) only ever posts 'saveSettings', never
+        // 'refreshSettings', so this branch was unreachable dead code. The
+        // matching 'settingsUpdate' listener in the HTML is also dead.
     });
 
     panel.onDidDispose(() => {
@@ -125,8 +113,13 @@ function _getSettingsHtml(currentSettings, mode) {
     } else {
         html = '<!DOCTYPE html><html><body><h2>Settings template not found</h2></body></html>';
     }
-    html = html.replace(/\{\{INITIAL_SETTINGS\}\}/g, JSON.stringify(currentSettings));
+    // #FIX(1.85.1): Add </script-escape for INITIAL_SETTINGS (same protection
+    // as _JSON suffixed placeholders). Although current settings values are
+    // pre-defined enums, this ensures consistency with the security model.
+    html = html.replace(/\{\{INITIAL_SETTINGS\}\}/g, JSON.stringify(currentSettings).replace(/<\//g, '<\\/'));
     html = html.replace(/\{\{INITIAL_MODE\}\}/g, mode);
+    // JSON-safe templates (new — for _JSON suffixed placeholders in HTML):
+    html = html.replace(/\{\{INITIAL_MODE_JSON\}\}/g, JSON.stringify(mode).replace(/<\//g, '<\\/'));
     return html;
 }
 
