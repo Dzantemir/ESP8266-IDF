@@ -23,6 +23,22 @@ function getOtatoolPath() {
     return fs.existsSync(p) ? p : null;
 }
 
+// #FIX(1.85.5): Validate partition-table offset read from sdkconfig before passing
+// it to the shell. CONFIG_PARTITION_TABLE_OFFSET is normally a hex literal like
+// "0x8000", but sdkconfig is a user-editable text file — if it is tampered with,
+// an unvalidated value could be interpreted as shell syntax by cp.exec-based
+// terminal commands. Defense-in-depth: reject anything that is not a hex/dec
+// integer and fall back to the standard 0x8000 default.
+const _PT_OFFSET_RE = /^0x[0-9a-fA-F]+$|^\d+$/;
+function getValidPtOffset(root) {
+    const raw = getSdkconfigValue(root, 'CONFIG_PARTITION_TABLE_OFFSET');
+    if (raw && _PT_OFFSET_RE.test(raw.trim())) return raw.trim();
+    if (raw) {
+        log(`[OTA] Invalid CONFIG_PARTITION_TABLE_OFFSET="${raw}", falling back to 0x8000`);
+    }
+    return '0x8000';
+}
+
 // ─── Resolve CSV path with $(IDF_PATH) expansion ────────────────────────────
 function _resolveCsvPath(root, rawFilename) {
     const idfPath = getValidIdfPath();
@@ -335,8 +351,8 @@ async function cmdOtaFlash() {
     t.show(true);
 
     const pycmd = pythonCmd.replace(/^& /, '').replace(/^"|"$/g, '');
-    const ptOffset = getSdkconfigValue(root, 'CONFIG_PARTITION_TABLE_OFFSET') || '0x8000';
-    const baud = cfg('flashBaud') || '115200';
+    const ptOffset = getValidPtOffset(root);
+    const baud = '115200';
 
     const baseArgs = [
         `${pycmd} ${q(otatoolPath)}`,
@@ -403,8 +419,8 @@ async function cmdOtaSwitch() {
     t.show(true);
 
     const pycmd = pythonCmd.replace(/^& /, '').replace(/^"|"$/g, '');
-    const ptOffset = getSdkconfigValue(root, 'CONFIG_PARTITION_TABLE_OFFSET') || '0x8000';
-    const baud = cfg('flashBaud') || '115200';
+    const ptOffset = getValidPtOffset(root);
+    const baud = '115200';
 
     const baseArgs = [
         `${pycmd} ${q(otatoolPath)}`,
@@ -457,8 +473,8 @@ async function cmdOtaReadOtadata() {
     t.show(true);
 
     const pycmd = pythonCmd.replace(/^& /, '').replace(/^"|"$/g, '');
-    const ptOffset = getSdkconfigValue(root, 'CONFIG_PARTITION_TABLE_OFFSET') || '0x8000';
-    const baud = cfg('flashBaud') || '115200';
+    const ptOffset = getValidPtOffset(root);
+    const baud = '115200';
 
     const baseArgs = [
         `${pycmd} ${q(otatoolPath)}`,
@@ -522,11 +538,11 @@ async function cmdOtaErase() {
         // Try to read current boot slot from device (async — does not block UI)
         const otatoolPathErase = getOtatoolPath();
         const pycmdErase = pythonCmd.replace(/^& /, '').replace(/^"|"$/g, '');
-        const ptOffset = getSdkconfigValue(root, 'CONFIG_PARTITION_TABLE_OFFSET') || '0x8000';
+        const ptOffset = getValidPtOffset(root);
         let activeSlot = null;
         try {
             const readResult = await new Promise((resolve, reject) => {
-                const readArgs = [otatoolPathErase, '--quiet', '--port', port, '--baud', String(cfg('flashBaud') || 115200), '--partition-table-offset', ptOffset, 'read_otadata'];
+                const readArgs = [otatoolPathErase, '--quiet', '--port', port, '--baud', '115200', '--partition-table-offset', ptOffset, 'read_otadata'];
                 cp.execFile(pycmdErase, readArgs, {
                     env: { ...process.env, IDF_PATH: idfPath },
                     encoding: 'utf8',
@@ -576,8 +592,8 @@ async function cmdOtaErase() {
     t.show(true);
 
     const pycmd = pythonCmd.replace(/^& /, '').replace(/^"|"$/g, '');
-    const ptOffset = getSdkconfigValue(root, 'CONFIG_PARTITION_TABLE_OFFSET') || '0x8000';
-    const baud = cfg('flashBaud') || '115200';
+    const ptOffset = getValidPtOffset(root);
+    const baud = '115200';
 
     const baseArgs = [`${pycmd} ${q(otatoolPath)}`, `--quiet`, `--port`, port, `--baud`, String(baud), `--partition-table-offset`, ptOffset];
 

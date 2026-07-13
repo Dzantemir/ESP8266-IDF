@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.85.51
+
+### Maintenance
+
+- **package.json**: Added `"extensionKind": ["workspace"]`. The `vsixmanifest` already declared `ExtensionKind=workspace`, but VS Code reads this field from `package.json` (not the manifest). Without it, in Remote-SSH / WSL / Dev-Container scenarios the extension could be loaded in the UI context instead of the workspace context, breaking `idf.py` invocation and project discovery. The `extensionKind` field is now the single source of truth in `package.json`
+- **components.js**: Removed dead code — `cmdEditComponent`, `_getEditComponentHtml`, `_getDefaultEditComponentHtml` (the entire edit-component webview flow). `esp.editComponent` in `extension.js` was already delegating to `CmakeEditor.cmdCmakeEditorComponent`, never to `Components.cmdEditComponent`. Removed `cmdEditComponent` from `module.exports`. `closeEditComponentPanel` is kept as a no-op stub because `extension.js` still calls it from `deactivate()` and the project-switch path — `_editComponentPanel` is now permanently `null`, so the function is a safe no-op
+- **media/edit-component.html**: Removed (~35 KB). Was only referenced by the now-deleted `_getEditComponentHtml` function
+
+## 1.85.5
+
+### Bug Fixes
+
+**Critical:**
+- **fatfs_utils/fat.py**: Fixed `NameError: name 'FAT12' is not defined` raised by `FAT.get_chained_content()` when parsing a FAT12 filesystem image with a chained cluster sequence. `FAT12` was used at line 59 in the bad-cluster marker comparison (`self.boot_sector_state.fatfs_type == FAT12`) but was never imported — only `FAT16_BAD_CLUSTER` and `FAT12_BAD_CLUSTER` local constants were defined. Added `from .utils import FAT12`. This affected `fatfsparse.py` users on small partitions (< 4085 clusters) where the FAT type auto-resolves to FAT12
+- **ports.js**: Hardened `isPortAvailable()` on Windows by switching from `cp.exec(\`mode ${port}\`)` to `cp.execFile('mode', [port])`. Although `port` is already filtered by `PORT_NAME_REGEX` upstream, this is defense-in-depth: `execFile` passes the port as a single argv element with no shell interpretation, so a future regex regression cannot introduce a command-injection vector via cmd.exe metacharacters. Also added `windowsHide: true` so the `mode.com` console window no longer flashes on screen during the availability check
+
+**Security:**
+- **otaFlash.js**: Added regex validation (`/^0x[0-9a-fA-F]+$|^\d+$/`) for `CONFIG_PARTITION_TABLE_OFFSET` read from the user-editable `sdkconfig` file before it is interpolated into the terminal command string passed to `otatool.py`. Previously, a tampered `sdkconfig` could inject shell syntax via the `--partition-table-offset` argument. Now any value that is not a clean hex/decimal integer falls back to the standard `0x8000` default with a log warning. Applied to all 5 OTA command sites (Flash, Switch, Read, Erase, Erase pre-flight read_otadata). New helper: `getValidPtOffset(root)`
+
+## 1.85.4
+
+### Bug Fixes
+
+**Critical:**
+- **flash.js / extension.js / treeProvider.js / package.json / statusBar.js / ports.js / otaFlash.js / readme.md**: Removed the entire "Manual flash settings" feature (the `Source: Manual` / `Source: Menuconfig` toggle and its `Serial Source Settings` UI group). Previously, switching to Manual mode passed `--flash_mode` / `--flash_freq` / `--flash_size` / `-z` to `idf.py`, which does not accept these options — they are `esptool.py` options. This caused `Error: No such option: --flash_mode` on every Flash / Flash & Monitor / Monitor attempt in Manual mode. All flash parameters (baud, mode, freq, size, compression, `--before` / `--after` reset behaviour) must now be configured via **menuconfig → Serial flasher config**, which is the only path `idf.py flash` actually supports. Specifically removed:
+  - VS Code settings: `esp8266-idf.overrideFlashConfig`, `esp8266-idf.flashBaud`, `esp8266-idf.flashMode`, `esp8266-idf.flashFreq`, `esp8266-idf.flashSize`, `esp8266-idf.useCompressedUpload`, `esp8266-idf.beforeFlashing`, `esp8266-idf.afterFlashing`
+  - Commands: `esp.toggleOverride`, `esp.selectFlashBaud`, `esp.selectFlashMode`, `esp.selectFlashFreq`, `esp.selectFlashSize`, `esp.toggleCompressedUpload`, `esp.selectBeforeFlashing`, `esp.selectAfterFlashing`
+  - Tree view: the "⚙️ Serial Source Settings" group with `Source: Manual` / `Source: Menuconfig` toggle. Replaced with a minimal "🔌 Port Settings" group that only contains the port selector
+  - Status bar: the `[Manual mode]` / `[Menuconfig mode]` suffix on the port tooltip
+  - Port picker: the `[Manual mode — port used for flash & monitor]` / `[Menuconfig mode — ...]` hint in the title
+  - `flash.js → runFlash`: removed the `overrideFlash` branch that built `--flash_mode` / `--flash_freq` / `--flash_size` / `-z` arguments for `idf.py`. Now always uses `idf.py -p <port> <action>`
+  - `extension.js → cmdFlashFsImage`: removed the `overrideFlash` branch (which was the only correct use of those options, since `cmdFlashFsImage` calls `esptool.py` directly). Also dropped the `--before` / `--after` arguments — `esptool.py` defaults (`default_reset` / `hard_reset`) are used
+  - `otaFlash.js`: hardcoded `--baud 115200` (was reading the now-removed `esp8266-idf.flashBaud` setting) for `otatool.py` invocations
+  - `readme.md`: removed the deleted settings from the Extension Settings table
+
+## 1.85.3
+
+### Bug Fixes
+
+**Critical:**
+- **flash.js**: Corrected the 1.85.2 `erase_flash` fix, which was based on a wrong assumption. The 1.85.2 fix assumed `erase_flash` needed no build artifacts and only checked for the `build/` DIRECTORY existence — but `erase_flash` **does** need `build/flasher_args.json`. This is proven by the idf.py traceback users see on a clean build dir: `erase_flash` → `_get_esptool_args()` → `open(os.path.join(args.build_dir, "flasher_args.json"))` → `FileNotFoundError`. When `build/` existed but `flasher_args.json` was missing inside it (e.g. after `fullclean`, or a partial/corrupt build state), the 1.85.2 fix ran `erase_flash` directly and it crashed with the traceback above. Now the check tests the actual file `erase_flash` needs — `build/flasher_args.json` (not the directory). When it's missing, a lightweight `reconfigure` (CMake configure step, no compilation — regenerates `flasher_args.json`) is chained with `erase_flash`; when it exists, `erase_flash` runs directly. This also fixes the original second bug: the generic `flasher_args.json` check below ran a full `build` for `erase_flash` but then dropped the `erase_flash` command entirely (`postBuildAction='none'` for `erase_flash`), so the erase never actually ran
+
+## 1.85.2
+
+### Bug Fixes
+
+**Critical:**
+- **flash.js**: Fixed `erase_flash` triggering a full build (and failing with a Python builder error) when the build directory doesn't exist. `erase_flash` only erases the entire flash chip — it does NOT need `flasher_args.json` or compiled binaries. Previously the `flasher_args.json` check in `runFlash` sent `erase_flash` down the full-build path, which (a) was slow, (b) caused idf.py's Python builder to throw an error when the build directory was entirely missing, and (c) silently dropped the `erase_flash` command afterward (because `postBuildAction` for `erase_flash` resolves to `'none'`, so nothing ran after the build). Now `erase_flash` has a dedicated branch: if the `build/` directory is missing, it runs a lightweight `reconfigure` (CMake config only, no compilation) chained with `erase_flash`; if `build/` exists, it runs `erase_flash` directly — skipping the `flasher_args.json` check entirely
+
 ## 1.85.1
 
 ### Bug Fixes

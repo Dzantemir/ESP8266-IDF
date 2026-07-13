@@ -2,13 +2,16 @@
 	"name": "esp8266-idf",
 	"displayName": "ESP8266-IDF",
 	"description": "Build, flash, monitor and configure ESP8266-series projects (ESP8266, ESP8285) using ESP8266_RTOS_SDK (idf.py). Supports Windows, Linux and macOS.",
-	"version": "1.85.1",
+	"version": "1.85.51",
 	"publisher": "Dzantemir",
 	"author": "Dzantemir",
 	"license": "MIT",
 	"engines": {
 		"vscode": "^1.75.0"
 	},
+	"extensionKind": [
+		"workspace"
+	],
 	"categories": [
 		"Other",
 		"Debuggers",
@@ -203,44 +206,12 @@
 				"title": "ESP › Select Port"
 			},
 			{
-				"command": "esp.selectFlashBaud",
-				"title": "ESP › Select Flash Baud Rate"
-			},
-			{
 				"command": "esp.selectIdf",
 				"title": "ESP › Select IDF Path"
 			},
 			{
 				"command": "esp.selectProject",
 				"title": "ESP › Select Project"
-			},
-			{
-				"command": "esp.toggleOverride",
-				"title": "ESP › Toggle Flash Override"
-			},
-			{
-				"command": "esp.selectFlashMode",
-				"title": "ESP › Select Flash Mode"
-			},
-			{
-				"command": "esp.selectFlashFreq",
-				"title": "ESP › Select Flash Frequency"
-			},
-			{
-				"command": "esp.selectFlashSize",
-				"title": "ESP › Select Flash Size"
-			},
-			{
-				"command": "esp.toggleCompressedUpload",
-				"title": "ESP › Toggle Compressed Upload"
-			},
-			{
-				"command": "esp.selectBeforeFlashing",
-				"title": "ESP › Select Chip Reset Before Flash (esptool --before)"
-			},
-			{
-				"command": "esp.selectAfterFlashing",
-				"title": "ESP › Select Chip Reset After Flash (esptool --after)"
 			},
 			{
 				"command": "esp.configureBuild",
@@ -379,11 +350,6 @@
 				{
 					"command": "esp.configureFlash",
 					"when": "view == esp8266-idf.projectView && viewItem == flashItem && !esp.busy",
-					"group": "inline"
-				},
-				{
-					"command": "esp.toggleOverride",
-					"when": "view == esp8266-idf.projectView && viewItem == sourceItem && !esp.busy",
 					"group": "inline"
 				},
 				{
@@ -670,74 +636,6 @@
 					"default": "",
 					"description": "COM port for flashing (e.g., COM3 or /dev/ttyUSB0)"
 				},
-				"esp8266-idf.overrideFlashConfig": {
-					"type": "boolean",
-					"default": false,
-					"description": "Use manual flash settings instead of menuconfig"
-				},
-				"esp8266-idf.flashBaud": {
-					"type": "number",
-					"default": 115200,
-					"description": "Flash baud rate"
-				},
-				"esp8266-idf.flashMode": {
-					"type": "string",
-					"default": "dio",
-					"enum": [
-						"dio",
-						"dout",
-						"qio",
-						"qout"
-					],
-					"description": "SPI Flash mode"
-				},
-				"esp8266-idf.flashFreq": {
-					"type": "string",
-					"default": "40m",
-					"enum": [
-						"40m",
-						"80m",
-						"20m",
-						"26m"
-					],
-					"description": "SPI Flash frequency"
-				},
-				"esp8266-idf.flashSize": {
-					"type": "string",
-					"default": "2MB",
-					"enum": [
-						"1MB",
-						"2MB",
-						"4MB",
-						"8MB",
-						"16MB"
-					],
-					"description": "SPI Flash size"
-				},
-				"esp8266-idf.useCompressedUpload": {
-					"type": "boolean",
-					"default": true,
-					"description": "Use compressed upload (-z)"
-				},
-				"esp8266-idf.beforeFlashing": {
-					"type": "string",
-					"enum": [
-						"default_reset",
-						"no_reset",
-						"no_reset_no_sync"
-					],
-					"default": "default_reset",
-					"description": "Chip reset mode before flash (esptool --before)"
-				},
-				"esp8266-idf.afterFlashing": {
-					"type": "string",
-					"enum": [
-						"hard_reset",
-						"no_reset"
-					],
-					"default": "hard_reset",
-					"description": "Chip reset mode after flash (esptool --after)"
-				},
 				"esp8266-idf.shellPath": {
 					"type": "string",
 					"default": "",
@@ -809,8 +707,8 @@
 		"@vscode/vsce": "^3.9.1"
 	},
 	"__metadata": {
-		"installedTimestamp": 1781777481133,
+		"installedTimestamp": 1783949162312,
 		"targetPlatform": "undefined",
-		"size": 961302
+		"size": 916358
 	}
 }

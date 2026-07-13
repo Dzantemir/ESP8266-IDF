@@ -6,6 +6,7 @@ from typing import List, Optional
 from .cluster import Cluster
 from .exceptions import NoFreeClusterException
 from .fatfs_state import BootSectorState
+from .utils import FAT12  # #FIX(1.85.5): FAT12 was used at line 59 (bad_marker comparison) but not imported — NameError on FAT12 chain parsing.
 
 
 class FAT:

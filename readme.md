@@ -257,10 +257,6 @@ Quick access buttons: **Build** → **Flash** → **Clean** → **Monitor** → 
 | `esp8266-idf.idfPath` | Path to ESP8266_RTOS_SDK | |
 | `esp8266-idf.pythonPath` | Manual path to Python 3.7 | |
 | `esp8266-idf.comPort` | COM port (`COM3` or `/dev/ttyUSB0`) | |
-| `esp8266-idf.flashBaud` | Flash baud rate | `115200` |
-| `esp8266-idf.flashSize` | Flash size | `2MB` |
-| `esp8266-idf.flashMode` | SPI flash mode | `dio` |
-| `esp8266-idf.flashFreq` | SPI flash frequency | `40m` |
 | `esp8266-idf.monitorBaud` | Monitor baud rate | `74880` |
 | `esp8266-idf.preBuildAction` | Action before Build (none/clean/fullclean) | `none` |
 | `esp8266-idf.postBuildAction` | Action after successful build | `none` |
@@ -280,10 +276,6 @@ Quick access buttons: **Build** → **Flash** → **Clean** → **Monitor** → 
 | `esp8266-idf.preFlashPartitionAction` | Action before Flash Partition Table (none) | `none` |
 | `esp8266-idf.postFlashPartitionAction` | Action after successful Flash Partition Table (none/monitor) | `none` |
 | `esp8266-idf.postFlashFsAction` | Action after successful flash filesystem (none/monitor) | `none` |
-| `esp8266-idf.beforeFlashing` | Chip reset before flash (esptool `--before`) | `default_reset` |
-| `esp8266-idf.afterFlashing` | Chip reset after flash (esptool `--after`) | `hard_reset` |
-| `esp8266-idf.useCompressedUpload` | Compressed upload (`-z`) | `true` |
-| `esp8266-idf.overrideFlashConfig` | Use manual flash settings | `false` |
 | `esp8266-idf.reuseTerminal` | Reuse existing terminal | `true` |
 | `esp8266-idf.saveSettingsToWorkspace` | Save settings per-project | `true` |
 | `esp8266-idf.autoGenerateOnOpen` | Automatically generate IntelliSense config and tasks.json on project open (only if files don't exist yet) | `true` |

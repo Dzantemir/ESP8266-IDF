@@ -471,62 +471,8 @@ async function cmdSelectProject() {
 // ╚══════════════════════════════════════════════════════════════════╝
 // cmdConfigureBuild, cmdConfigureBuildSimple, cmdConfigureFlash,
 // cmdConfigureFlashApp, cmdConfigureFlashFs — all moved to settingsEditor.js
-
-async function cmdSelectFlashBaud() {
-    if (checkBusy()) return;
-    const picked = await vscode.window.showQuickPick(['9600','19200','38400','57600','74880','115200','230400','460800','921600','1500000','2000000'].map(b => ({ label: b })),
-        { title: 'ESP8266-IDF Tools › Flash Baud Rate' }
-    );
-    if (picked) await setCfg('flashBaud', parseInt(picked.label, 10));
-}
-
-async function cmdSelectFlashMode() {
-    if (checkBusy()) return;
-    const picked = await vscode.window.showQuickPick(['dio','dout','qio','qout'].map(m => ({ label: m })),
-        { title: 'ESP8266-IDF Tools › Flash Mode' }
-    );
-    if (picked) await setCfg('flashMode', picked.label);
-}
-
-async function cmdSelectFlashFreq() {
-    if (checkBusy()) return;
-    const picked = await vscode.window.showQuickPick(['40m','80m','20m','26m'].map(f => ({ label: f })),
-        { title: 'ESP8266-IDF Tools › Flash Frequency' }
-    );
-    if (picked) await setCfg('flashFreq', picked.label);
-}
-
-async function cmdSelectFlashSize() {
-    if (checkBusy()) return;
-    const picked = await vscode.window.showQuickPick(['1MB','2MB','4MB','8MB','16MB'].map(s => ({ label: s })),
-        { title: 'ESP8266-IDF Tools › Flash Size' }
-    );
-    if (picked) await setCfg('flashSize', picked.label);
-}
-
-async function cmdToggleCompressedUpload() {
-    if (checkBusy()) return;
-    await setCfg('useCompressedUpload', !(cfg('useCompressedUpload') ?? true));
-}
-
-async function cmdSelectBeforeFlashing() {
-    if (checkBusy()) return;
-    const picked = await vscode.window.showQuickPick([
-        { label: 'default_reset',   description: 'Reset to bootloader (default)' },
-        { label: 'no_reset',        description: 'No reset' },
-        { label: 'no_reset_no_sync',description: 'No reset, no sync' },
-    ], { title: 'ESP8266-IDF Tools › Chip Reset Before Flash (esptool --before)' });
-    if (picked) await setCfg('beforeFlashing', picked.label);
-}
-
-async function cmdSelectAfterFlashing() {
-    if (checkBusy()) return;
-    const picked = await vscode.window.showQuickPick([
-        { label: 'hard_reset', description: 'Hard reset after flashing (default)' },
-        { label: 'no_reset',   description: 'No reset' },
-    ], { title: 'ESP8266-IDF Tools › Chip Reset After Flash (esptool --after)' });
-    if (picked) await setCfg('afterFlashing', picked.label);
-}
+// Flash parameters (baud/mode/freq/size/compression/before/after) were removed
+// in v1.85.4 — they are configured exclusively via menuconfig now.
 
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  FILESYSTEM IMAGE GENERATORS                                        ║
@@ -1035,32 +981,12 @@ async function cmdFlashFsImage(fsLabel, subtypes, binSuffix) {
 
     const pycmd = pythonCmd.replace(/^& /, '').replace(/^"|"$/g, '');
 
-    // #22: Respect overrideFlashConfig — only include flash params in manual mode
-    const overrideFlash = cfg('overrideFlashConfig');
-    const beforeFlash = cfg('beforeFlashing') || 'default_reset';
-    const afterFlash  = cfg('afterFlashing')  || 'hard_reset';
-    // --before / --after are TOP-LEVEL esptool options (not write_flash subcommand
-    // options). They MUST appear BEFORE the 'write_flash' subcommand on the CLI.
-    const esptoolArgs = ['--port', port,
-        '--before', beforeFlash, '--after', afterFlash];
-
-    if (overrideFlash) {
-        const baud = cfg('flashBaud') || 115200;
-        const compressed = cfg('useCompressedUpload') ?? true;
-        const flashMode = cfg('flashMode') || 'dio';
-        const flashFreq = cfg('flashFreq') || '40m';
-        const flashSize = cfg('flashSize') || '2MB';
-        esptoolArgs.push('--baud', String(baud));
-        esptoolArgs.push('write_flash',
-            '--flash_mode', flashMode,
-            '--flash_freq', flashFreq,
-            '--flash_size', flashSize,
-            compressed ? '--compress' : '--no-compress',
-        );
-    } else {
-        // Menuconfig mode: let esptool read flash settings from binary image
-        esptoolArgs.push('write_flash');
-    }
+    // Flash filesystem image via esptool.py write_flash.
+    // Flash settings (mode/freq/size/compression, chip reset behaviour) are no longer
+    // exposed as manual overrides in the extension — they are configured via menuconfig.
+    // esptool.py write_flash uses sensible defaults (default_reset / hard_reset) and
+    // reads flash layout from the binary image header.
+    const esptoolArgs = ['--port', port, 'write_flash'];
 
     esptoolArgs.push(selectedPart.offset, q(selectedBin));
 
@@ -1083,7 +1009,7 @@ async function cmdFlashFsImage(fsLabel, subtypes, binSuffix) {
         t.sendText(cmdParts.join(' && ') + buildMarkerCmd(markerFile));
     }
 
-    log(`[Flash ${fsLabel}] writing ${selectedBin} to offset ${selectedPart.offset} on ${port} (overrideFlash=${overrideFlash})`);
+    log(`[Flash ${fsLabel}] writing ${selectedBin} to offset ${selectedPart.offset} on ${port}`);
 
     // #FIX(1.85.0): Await the watch promise so the finally block runs only after
     // esptool finishes writing to flash. Previously the .then().catch() chain was
@@ -1555,14 +1481,6 @@ function activate(ctx) {
     reg('esp.configureFlash',    async () => { await SettingsEditor.cmdSettingsEditor('flash');     provider.refresh(); });
     reg('esp.configureFlashApp', async () => { await SettingsEditor.cmdSettingsEditor('flash');     provider.refresh(); });
     reg('esp.configureFlashFs',  async () => { await SettingsEditor.cmdSettingsEditor('flashfs');   provider.refresh(); });
-    reg('esp.toggleOverride', async () => { if (checkBusy()) return; await setCfg('overrideFlashConfig', !cfg('overrideFlashConfig')); provider.refresh(); StatusBar.refreshStatusBar(); });
-    reg('esp.selectFlashBaud',         async () => { await cmdSelectFlashBaud();         provider.refresh(); });
-    reg('esp.selectFlashMode',         async () => { await cmdSelectFlashMode();         provider.refresh(); });
-    reg('esp.selectFlashFreq',         async () => { await cmdSelectFlashFreq();         provider.refresh(); });
-    reg('esp.selectFlashSize',         async () => { await cmdSelectFlashSize();         provider.refresh(); });
-    reg('esp.toggleCompressedUpload',  async () => { await cmdToggleCompressedUpload();  provider.refresh(); });
-    reg('esp.selectBeforeFlashing',    async () => { await cmdSelectBeforeFlashing();    provider.refresh(); });
-    reg('esp.selectAfterFlashing',     async () => { await cmdSelectAfterFlashing();     provider.refresh(); });
     reg('esp.refreshViews', () => {
         setToolsVerified(false);
         setPythonCmdCache(null);

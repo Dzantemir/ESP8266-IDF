@@ -109,15 +109,6 @@ class EspProvider {
             tooltip: 'Create a new ESP8266 project from template'
         });
 
-        const overrideFlash = cfg('overrideFlashConfig');
-        const flashBaud   = cfg('flashBaud')            || 115200;
-        const flashMode   = cfg('flashMode')            || 'dio';
-        const flashFreq   = cfg('flashFreq')            || '40m';
-        const flashSize   = cfg('flashSize')            || '2MB';
-        const compressed  = cfg('useCompressedUpload')  ?? true;
-        const beforeFlash = cfg('beforeFlashing')       || 'default_reset';
-        const afterFlash  = cfg('afterFlashing')        || 'hard_reset';
-
         let idfLabel   = 'not set';
         let idfDesc    = 'click to specify';
         let idfTooltip = 'Click to specify ESP8266_RTOS_SDK folder';
@@ -132,31 +123,12 @@ class EspProvider {
             idfTooltip = 'tools/idf_tools.py not found';
         }
 
-        const manualSettings = [
-            new EspItem(`Port: ${port}`,                             { command: 'esp.selectPort',           icon: 'plug',            tooltip: 'Click to select port', desc: port === '—' ? 'not selected' : '' }),
-            new EspItem(`Baud rate: ${flashBaud}`,                   { command: 'esp.selectFlashBaud',      icon: 'dashboard',       tooltip: 'Flash speed' }),
-            new EspItem(`Flash Mode: ${flashMode}`,                  { command: 'esp.selectFlashMode',      icon: 'chip',            tooltip: 'SPI Flash mode' }),
-            new EspItem(`Flash Freq: ${flashFreq}`,                  { command: 'esp.selectFlashFreq',      icon: 'pulse',           tooltip: 'SPI Flash frequency' }),
-            new EspItem(`Flash Size: ${flashSize}`,                  { command: 'esp.selectFlashSize',      icon: 'database',        tooltip: 'SPI Flash size' }),
-            new EspItem(`Compression: ${compressed ? 'Yes' : 'No'}`, { command: 'esp.toggleCompressedUpload', icon: 'file-zip',      tooltip: 'Use compression when flashing' }),
-            new EspItem(`Esptool --before: ${beforeFlash}`,     { command: 'esp.selectBeforeFlashing', icon: 'debug-step-over', tooltip: 'Chip reset mode before flash (esptool --before)' }),
-            new EspItem(`Esptool --after: ${afterFlash}`,       { command: 'esp.selectAfterFlashing',  icon: 'debug-step-out',  tooltip: 'Chip reset mode after flash (esptool --after)' }),
-        ];
-
-        let sourceItem;
-        if (overrideFlash) {
-            sourceItem = new EspGroup('sourceGroup', 'Source: Manual', manualSettings, 'sourceItem', vscode.TreeItemCollapsibleState.Expanded);
-        } else {
-            sourceItem = new EspItem('Source: Menuconfig', {
-                command: 'esp.toggleOverride',
-                icon: 'settings',
-                tooltip: 'Click to switch to Manual settings',
-                contextValue: 'sourceItem'
-            });
-        }
-        if (!(sourceItem instanceof EspGroup)) {
-            sourceItem.iconPath = new vscode.ThemeIcon('settings');
-        }
+        const portItem = new EspItem(`Port: ${port}`, {
+            command: 'esp.selectPort',
+            icon:    'plug',
+            tooltip: 'Click to select port (flash settings are configured via menuconfig)',
+            desc:    port === '—' ? 'not selected' : '',
+        });
 
         const pythonManualPath = cfg('pythonPath') || '';
         const pythonLabel = pythonManualPath
@@ -226,7 +198,7 @@ class EspProvider {
                 new EspItem('Size Files',      { command: 'esp.sizeFiles',      icon: 'graph', iconColor: 'charts.yellow', tooltip: 'idf.py size-files\nPrint per-source-file size information' }),
             ]),
 
-            new EspGroup('settingsGroup', '⚙️  Serial Source Settings', [sourceItem]),
+            new EspGroup('settingsGroup', '🔌  Port Settings', [portItem]),
 
             new EspGroup('configureGroup', '🔩  SDK Configure', [
                 new EspItem('Menuconfig',      { command: 'esp.menuconfig',  icon: 'settings-gear', iconColor: 'charts.orange', tooltip: 'idf.py menuconfig\nRun "menuconfig" project configuration tool\n⚠️ Requires terminal: min 80 columns × 19 rows' }),

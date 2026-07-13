@@ -84,10 +84,8 @@ function detectPortsMac() {
 
 async function cmdSelectPort() {
     if (checkBusy()) return;
-    const overrideFlash = cfg('overrideFlashConfig');
-    const modeHint = overrideFlash
-        ? 'Manual mode — port used for flash & monitor'
-        : 'Menuconfig mode — port used for flash & monitor (baud/mode from menuconfig)';
+    // Flash parameters (baud/mode/freq/size/compression) are configured via menuconfig
+    // since v1.85.4 — no manual/menuconfig mode distinction in the port picker.
 
     const ports = await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: 'ESP: Searching for ports...' },
@@ -108,7 +106,7 @@ async function cmdSelectPort() {
         { label: '$(edit) Enter manually...', description: '' },
     ];
     const picked = await vscode.window.showQuickPick(items, {
-        title: `ESP8266-IDF Tools › Select Port[${modeHint}]`,
+        title: 'ESP8266-IDF Tools › Select Port',
         placeHolder: IS_WIN ? 'COM3, COM4...' : '/dev/ttyUSB0, /dev/ttyACM0...',
     });
     if (!picked) return null;
@@ -138,7 +136,11 @@ async function cmdSelectPort() {
 function isPortAvailable(port) {
     return new Promise(resolve => {
         if (IS_WIN) {
-            cp.exec(`mode ${port}`, { timeout: 3000 }, err => resolve(!err));
+            // #FIX(1.85.5): Use cp.execFile (no shell) instead of cp.exec with string interpolation.
+            // Even though `port` is validated by PORT_NAME_REGEX upstream, defense-in-depth —
+            // execFile passes the port as a single argv element, so shell metacharacters
+            // (if a future regex change ever lets one through) cannot be interpreted by cmd.exe.
+            cp.execFile('mode', [port], { timeout: 3000, windowsHide: true }, err => resolve(!err));
         } else {
             try { fs.accessSync(port, fs.constants.R_OK | fs.constants.W_OK); resolve(true); } catch { resolve(false); }
         }

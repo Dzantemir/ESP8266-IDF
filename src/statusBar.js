@@ -99,16 +99,16 @@ function refreshMonitorButton() {
 function refreshStatusBar() {
     const _statusBarPort = getStatusBarPort();
     if (!_statusBarPort) return;
-    const port          = cfg('comPort');
-    const overrideFlash = cfg('overrideFlashConfig');
-    const modeLabel     = overrideFlash ? 'Manual' : 'Menuconfig';
+    const port = cfg('comPort');
+    // Flash settings (baud/mode/freq/size) are configured exclusively via menuconfig
+    // since v1.85.4 — no manual mode indicator in the status bar.
     if (port) {
         _statusBarPort.text            = `$(plug) ${port}`;
-        _statusBarPort.tooltip         = `ESP port: ${port} [${modeLabel} mode]\nClick to change port`;
+        _statusBarPort.tooltip         = `ESP port: ${port}\nClick to change port`;
         _statusBarPort.backgroundColor = undefined;
     } else {
         _statusBarPort.text            = `$(plug) No port`;
-        _statusBarPort.tooltip         = `ESP: No port selected  [${modeLabel} mode]\nClick to select port`;
+        _statusBarPort.tooltip         = 'ESP: No port selected\nClick to select port';
         _statusBarPort.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
     }
     _statusBarPort.show();
